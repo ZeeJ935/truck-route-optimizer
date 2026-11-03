@@ -86,3 +86,14 @@ SAME_PLACE_MAX_MILES = 0.5
 
 # Longest accepted origin or destination text.
 MAX_PLACE_QUERY_LENGTH = 200
+
+# --- Time budget -----------------------------------------------------------------
+
+# An analysis must finish well inside the 120 s Gunicorn worker timeout and the
+# 120 s frontend timeout, leaving room for serialization and transfer.
+ANALYSIS_TIME_BUDGET_SECONDS = 100
+
+# After an Open-Meteo 429, wait this long, then retry the unfinished batches once.
+WEATHER_RETRY_DELAY_SECONDS = 30
+# Time reserved for the retried requests themselves when checking the budget.
+WEATHER_RETRY_MARGIN_SECONDS = 15

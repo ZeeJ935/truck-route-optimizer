@@ -12,6 +12,8 @@ interface AnalysisFormProps {
   busy: boolean
   serverErrors: Record<string, string>
   onSubmit: (values: FormValues) => void
+  /** Called when the user changes a field or submits a form that fails validation. */
+  onEdit: () => void
 }
 
 const INITIAL_VALUES: Omit<FormValues, 'departureLocal'> = {
@@ -21,20 +23,19 @@ const INITIAL_VALUES: Omit<FormValues, 'departureLocal'> = {
   interval: '25',
 }
 
-export function AnalysisForm({ busy, serverErrors, onSubmit }: AnalysisFormProps) {
+export function AnalysisForm({ busy, serverErrors, onSubmit, onEdit }: AnalysisFormProps) {
   const [values, setValues] = useState<FormValues>(() => ({
     ...INITIAL_VALUES,
     departureLocal: defaultDepartureInput(),
   }))
   const [errors, setErrors] = useState<FieldErrors>({})
   const [submitted, setSubmitted] = useState(false)
-  const [edited, setEdited] = useState<Set<FieldName>>(() => new Set())
   const id = useId()
 
-  const update = (field: keyof FormValues, name: FieldName) => (value: string) => {
+  const update = (field: keyof FormValues) => (value: string) => {
     const next = { ...values, [field]: value }
     setValues(next)
-    setEdited((current) => new Set(current).add(name))
+    onEdit()
     if (submitted) setErrors(validateForm(next))
   }
 
@@ -43,12 +44,12 @@ export function AnalysisForm({ busy, serverErrors, onSubmit }: AnalysisFormProps
     const found = validateForm(values)
     setErrors(found)
     setSubmitted(true)
-    setEdited(new Set())
     if (Object.keys(found).length === 0) onSubmit(values)
+    else onEdit()
   }
 
-  // Client-side errors first; otherwise the backend's error for the field, until the field is edited.
-  const errorFor = (field: FieldName) => errors[field] ?? (edited.has(field) ? undefined : serverErrors[field])
+  // Client-side errors first; otherwise the backend's error for the field (cleared once the user edits).
+  const errorFor = (field: FieldName) => errors[field] ?? serverErrors[field]
   const fieldProps = (field: FieldName) => {
     const message = errorFor(field)
     return {
@@ -76,7 +77,7 @@ export function AnalysisForm({ busy, serverErrors, onSubmit }: AnalysisFormProps
           autoComplete="off"
           placeholder="City, state or address"
           value={values.origin}
-          onChange={(event) => update('origin', 'origin')(event.target.value)}
+          onChange={(event) => update('origin')(event.target.value)}
         />
         {errorText('origin')}
       </div>
@@ -89,7 +90,7 @@ export function AnalysisForm({ busy, serverErrors, onSubmit }: AnalysisFormProps
           autoComplete="off"
           placeholder="City, state or address"
           value={values.destination}
-          onChange={(event) => update('destination', 'destination')(event.target.value)}
+          onChange={(event) => update('destination')(event.target.value)}
         />
         {errorText('destination')}
       </div>
@@ -100,7 +101,7 @@ export function AnalysisForm({ busy, serverErrors, onSubmit }: AnalysisFormProps
           {...fieldProps('departure_time')}
           type="datetime-local"
           value={values.departureLocal}
-          onChange={(event) => update('departureLocal', 'departure_time')(event.target.value)}
+          onChange={(event) => update('departureLocal')(event.target.value)}
         />
         <p className="field-hint">
           Your time zone: {offsetLabel(browserOffsetMinutes(values.departureLocal))}. Trip times are shown in this
@@ -119,7 +120,7 @@ export function AnalysisForm({ busy, serverErrors, onSubmit }: AnalysisFormProps
             min="1"
             step="any"
             value={values.loadWeight}
-            onChange={(event) => update('loadWeight', 'load_weight_lb')(event.target.value)}
+            onChange={(event) => update('loadWeight')(event.target.value)}
           />
           {errorText('load_weight_lb')}
         </div>
@@ -129,7 +130,7 @@ export function AnalysisForm({ busy, serverErrors, onSubmit }: AnalysisFormProps
           <select
             {...fieldProps('sampling_interval_miles')}
             value={values.interval}
-            onChange={(event) => update('interval', 'sampling_interval_miles')(event.target.value)}
+            onChange={(event) => update('interval')(event.target.value)}
           >
             {SAMPLING_INTERVALS.map((interval) => (
               <option key={interval} value={interval}>

@@ -2,6 +2,9 @@ import { useEffect, useState } from 'react'
 
 // After this long, explain that a free server may be waking up.
 export const SLOW_START_NOTICE_SECONDS = 10
+// After this long, also explain that a busy provider (for example a weather
+// rate-limit retry, which waits about 30 s) can add time.
+export const BUSY_SERVICE_NOTICE_SECONDS = 30
 
 interface AnalysisStatusProps {
   startedAt: number
@@ -31,6 +34,11 @@ export function AnalysisStatus({ startedAt }: AnalysisStatusProps) {
         {elapsedSeconds >= SLOW_START_NOTICE_SECONDS && (
           <p className="analysis-status-detail">
             The server may be waking up after being idle. This can take up to a minute.
+          </p>
+        )}
+        {elapsedSeconds >= BUSY_SERVICE_NOTICE_SECONDS && (
+          <p className="analysis-status-detail">
+            Still working. A busy weather or routing service can add up to a minute.
           </p>
         )}
       </div>

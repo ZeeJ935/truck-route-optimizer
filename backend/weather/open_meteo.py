@@ -13,19 +13,29 @@ requested once. Each location counts as one call against Open-Meteo's limits.
 
 from __future__ import annotations
 
+import logging
 import math
-from collections.abc import Sequence
+import time
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from analysis.geometry import LatLng, round_location
-from analysis.limits import PROVIDER_TIMEOUT_SECONDS, WEATHER_BATCH_SIZE, WEATHER_COORD_DECIMALS
+from analysis.limits import (
+    PROVIDER_TIMEOUT_SECONDS,
+    WEATHER_BATCH_SIZE,
+    WEATHER_COORD_DECIMALS,
+    WEATHER_RETRY_DELAY_SECONDS,
+    WEATHER_RETRY_MARGIN_SECONDS,
+)
 from analysis.time_utils import require_aware
 from core.cache import TTLCache
 from core.errors import ProviderError, ProviderRateLimited
 from core.http import HttpSession, get_json
 
 from .types import HourlyWeather, LocationForecast
+
+logger = logging.getLogger(__name__)
 
 OPEN_METEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 PROVIDER_NAME = "Open-Meteo"
@@ -112,6 +122,8 @@ class OpenMeteoWeatherProvider:
         timeout: float = PROVIDER_TIMEOUT_SECONDS,
         url: str = OPEN_METEO_FORECAST_URL,
         batch_size: int = WEATHER_BATCH_SIZE,
+        sleep: Callable[[float], None] | None = None,
+        clock: Callable[[], float] | None = None,
     ):
         if batch_size <= 0:
             raise ValueError("batch_size must be positive.")
@@ -120,10 +132,22 @@ class OpenMeteoWeatherProvider:
         self._timeout = timeout
         self._url = url
         self._batch_size = batch_size
+        self._sleep = sleep or time.sleep
+        self._clock = clock or time.monotonic
 
     def hourly_forecast(
-        self, locations: Sequence[LatLng], start_utc: datetime, end_utc: datetime
+        self,
+        locations: Sequence[LatLng],
+        start_utc: datetime,
+        end_utc: datetime,
+        deadline: float | None = None,
     ) -> list[LocationForecast]:
+        """Forecasts for each location, in input order.
+
+        ``deadline`` is a ``clock()`` value the call must finish by. On a 429 the
+        provider waits WEATHER_RETRY_DELAY_SECONDS and retries the unfinished
+        batches once, but only if that still fits before the deadline.
+        """
         require_aware(start_utc, "start_utc")
         require_aware(end_utc, "end_utc")
         start = _floor_hour(start_utc)
@@ -144,14 +168,47 @@ class OpenMeteoWeatherProvider:
             else:
                 results[point] = cached
 
-        for offset in range(0, len(missing), self._batch_size):
-            batch = missing[offset : offset + self._batch_size]
-            for point, hours in zip(batch, self._fetch(batch, window)):
+        batches = [missing[offset : offset + self._batch_size] for offset in range(0, len(missing), self._batch_size)]
+        pending = self._fetch_batches(batches, window, results)
+        if pending:
+            retry_finishes_at = self._clock() + WEATHER_RETRY_DELAY_SECONDS + WEATHER_RETRY_MARGIN_SECONDS
+            if deadline is not None and retry_finishes_at > deadline:
+                logger.warning("Open-Meteo rate limited the request; no time left to retry %d batch(es).", len(pending))
+                raise ProviderRateLimited(RATE_LIMIT_MESSAGE)
+            logger.warning(
+                "Open-Meteo rate limited the request; retrying %d of %d batch(es) once in %d s.",
+                len(pending),
+                len(batches),
+                WEATHER_RETRY_DELAY_SECONDS,
+            )
+            self._sleep(WEATHER_RETRY_DELAY_SECONDS)
+            if self._fetch_batches(pending, window, results):
+                logger.warning("Open-Meteo rate limited the retry as well.")
+                raise ProviderRateLimited(RATE_LIMIT_MESSAGE)
+
+        return [LocationForecast(lat=point[0], lng=point[1], hours=results[point]) for point in rounded]
+
+    def _fetch_batches(
+        self,
+        batches: Sequence[Sequence[LatLng]],
+        window: tuple[str, str],
+        results: dict[LatLng, tuple[HourlyWeather, ...]],
+    ) -> list[Sequence[LatLng]]:
+        """Fetch batches in order, storing results. Returns the batches left unfinished by a 429.
+
+        After a 429 no further batches are sent, because the per-minute limit is
+        already hit. Completed batches stay in ``results`` and are never requested again.
+        """
+        for index, batch in enumerate(batches):
+            try:
+                hours_by_point = self._fetch(batch, window)
+            except ProviderRateLimited:
+                return list(batches[index:])
+            for point, hours in zip(batch, hours_by_point):
                 results[point] = hours
                 if self._cache is not None:
                     self._cache.set(("weather", point, window), hours)
-
-        return [LocationForecast(lat=point[0], lng=point[1], hours=results[point]) for point in rounded]
+        return []
 
     def _fetch(self, batch: Sequence[LatLng], window: tuple[str, str]) -> list[tuple[HourlyWeather, ...]]:
         params = {

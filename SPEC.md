@@ -565,7 +565,7 @@ Tasks:
 1. Remove dead code and unused dependencies.
 2. Write the README: overview, architecture, stack, setup, environment variables, commands, API, risk rules, ranking, assumptions, testing, deployment, and limitations.
 3. Configure production settings, CORS, HTTPS, API URL settings, static assets, and logging.
-4. Deploy the frontend and backend.
+4. Deploy the frontend and backend. Run the deployed backend through Gunicorn using `backend/gunicorn.conf.py` (120-second worker timeout).
 5. Run the complete checks below.
 
 Automated checks:
@@ -588,6 +588,7 @@ Live checks, using real APIs:
 - Time zone labels
 - Invalid input
 - A clean browser session on the deployed app
+- A long analysis on the deployed backend completes under Gunicorn without a worker timeout
 
 Scenarios that require controlled weather, such as exact boundaries, all routes having No Travel miles, and forced provider failures, must be proven with fake-provider tests and reported as such.
 
@@ -595,6 +596,7 @@ Exit criteria:
 
 - All checks pass or are explicitly reported as unverified.
 - The deployed app works from a clean browser session.
+- The deployed backend runs under Gunicorn, and a long analysis completes without a worker timeout.
 - Every known limitation is in the README.
 
 ---

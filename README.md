@@ -251,7 +251,12 @@ Via-point attempts are optional extras. If one times out or fails after a route 
   4. Any budget left after checkpoints goes back to the corridor, up to 250. Corridor points are thinned evenly to fit.
   5. If the checkpoints still don't fit, the request is rejected with `validation_error`, and the message suggests a larger sampling interval. Checkpoints are never dropped.
 - **Heatmap corridor.** Each route gets a point every 25 miles, plus one 10 miles to each side, perpendicular to the direction of travel. Points shared between routes are counted once.
-- **Concurrent analyses.** Two analyses started within the same minute from the same server can still exceed Open-Meteo's 600-calls-per-minute limit. The second one then fails with `provider_rate_limited` and a message asking the user to retry in about a minute.
+- **Rate limits.** Open-Meteo's published free limit is 600 calls per minute, and each location in a request counts as one call. So two long analyses in a row can go over the limit.
+  - If Open-Meteo returns HTTP 429, the analysis waits about 30 seconds and retries once. Only the unfinished batches are retried; batches already received are never requested again.
+  - The retry only happens if the whole analysis can still finish within its 100-second budget, which is inside the 120-second server and browser limits.
+  - If the retry is also rate-limited, the analysis fails with `provider_rate_limited` and asks the user to try again in about a minute.
+  - So a second long analysis started right after another may wait about 30 seconds, or fail with that message.
+- **Waiting message.** While a retry is waiting, the browser keeps showing the real elapsed time. After 30 seconds it adds that a busy weather or routing service can add up to a minute.
 
 ## Distance basis
 
@@ -289,6 +294,28 @@ Each route also gets a status:
 - The top route is labelled **Recommended**, and the others are labelled **Alternative**.
 - If every route has No Travel miles, a global warning is shown and the top route is labelled **Best available, not safe**.
 - The recommendation reason names the first ranking value that separated the winner from the runner-up.
+
+## Map
+
+The map uses MapLibre GL JS with OpenFreeMap's Positron basemap, which needs no key. It shows OpenFreeMap, OpenMapTiles and OpenStreetMap attribution, and "Weather: Open-Meteo.com (CC BY 4.0)".
+
+- **Routes.** Every route is drawn.
+  - The selected route is a thick blue line with a white casing, always drawn above the other routes. So on shared highways the selected route stays visible.
+  - The top-ranked route, when not selected, is a dashed green line, labelled with its backend label ("Recommended", or "Best available, not safe").
+  - The other routes are muted grey.
+- **Hazard sections.** Each Severe or No Travel checkpoint on the selected route colours the road it represents: from the midpoint with the previous checkpoint to the midpoint with the next one. Severe is red and No Travel is purple, with a dark outline. Neighbouring sections of the same level are merged.
+- **Checkpoints.** The selected route's checkpoints are dots coloured by risk. They are smaller at overview zoom, so the line stays visible at 10-mile spacing, and Severe or No Travel dots stay larger. Hovering a dot shows its ETA and forecast hour with the time-zone label, mile, wind, rain, snow, risk and reasons. Clicking pins the popup.
+- **Markers.** "A" marks the origin and "B" the destination.
+- **Legend.** It describes every colour in text. It is collapsible and starts collapsed on narrow screens.
+- **Selection.** Clicking a route on the map selects it in the panel, and selecting a card in the panel highlights the route on the map. Switching only changes map filters; it makes no network request and doesn't move the view.
+- **Fitting.** The view fits all routes after each analysis.
+- **Performance.** Measured on the largest response (Dallas to Denver at 10-mile sampling, about 32,000 route points), with no geometry simplification:
+  - route switches took 36–54 ms
+  - panning and zooming produced no main-thread long tasks
+  - no frame took longer than 8 ms
+
+  The drawn lines therefore use the full route geometry.
+- **Loading.** MapLibre loads as a separate chunk after the form and results, and its web worker is served as its own asset.
 
 ## Assumptions
 

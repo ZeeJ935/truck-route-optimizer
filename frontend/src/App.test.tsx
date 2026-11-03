@@ -230,3 +230,82 @@ describe('waiting state', () => {
     expect(status).not.toHaveTextContent('%')
   })
 })
+
+describe('clearing an old error', () => {
+  const failure = () =>
+    jsonResponse({ error: { code: 'no_route_found', message: 'No truck route was found between these locations.' } }, 422)
+
+  it('removes the error banner as soon as the user changes the form', async () => {
+    const user = await submitTrip(failure())
+    expect(await screen.findByRole('alert')).toHaveTextContent('No truck route was found')
+    await user.type(screen.getByLabelText('Destination'), 'x')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('removes the error banner when a new validation error appears', async () => {
+    const user = await submitTrip(failure())
+    expect(await screen.findByRole('alert')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Load weight (lb)'), { target: { value: '' } })
+    await user.click(screen.getByRole('button', { name: 'Find the safest route' }))
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Load weight (lb)')).toHaveAccessibleDescription('Enter the load weight.')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('removes the banner even when validation fails without any field change', async () => {
+    // Make the departure stale so the next submit fails validation with no edit.
+    vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ['Date'] })
+    await submitTrip(failure())
+    expect(await screen.findByRole('alert')).toBeInTheDocument()
+    vi.setSystemTime(Date.now() + 3 * 60 * 60_000)
+    fireEvent.click(screen.getByRole('button', { name: 'Find the safest route' }))
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Departure')).toHaveAccessibleDescription('Departure time is in the past.')
+  })
+})
+
+describe('waiting during a weather retry', () => {
+  it('keeps counting and explains a busy service after 30 seconds', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: false })
+    fetchMock.mockReturnValueOnce(new Promise(() => {}))
+    render(<App />)
+    fireEvent.change(screen.getByLabelText('Origin'), { target: { value: 'Dallas, TX' } })
+    fireEvent.change(screen.getByLabelText('Destination'), { target: { value: 'Denver, CO' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Find the safest route' }))
+
+    const status = screen.getByRole('status')
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(29_000)
+    })
+    expect(status).not.toHaveTextContent('Still working')
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000)
+    })
+    expect(status).toHaveTextContent('Analyzing routes and weather… 30 s')
+    expect(status).toHaveTextContent('Still working. A busy weather or routing service can add up to a minute.')
+    expect(status).not.toHaveTextContent('%')
+  })
+})
+
+describe('map and panel selection stay in sync', () => {
+  it('selecting a route on the map updates the panel without another request', async () => {
+    const { Map: FakeMap } = await import('./test/maplibreFake')
+    await showResults(makeResponse())
+    const map = FakeMap.instances.at(-1)!
+    await act(async () => {
+      map.emit('click', 'routes-hit', { point: { x: 0, y: 0 }, features: [{ properties: { id: 'route-3' } }] })
+    })
+    expect(screen.getByRole('button', { name: 'Route 3, Alternative' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('region', { name: 'Checkpoints for Route 3' })).toBeInTheDocument()
+    expect(map.filters['route-selected']).toEqual(['==', ['get', 'id'], 'route-3'])
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('selecting a route in the panel updates the map', async () => {
+    const { Map: FakeMap } = await import('./test/maplibreFake')
+    const user = await showResults(makeResponse())
+    const map = FakeMap.instances.at(-1)!
+    await user.click(screen.getByRole('button', { name: 'Route 2, Alternative' }))
+    expect(map.filters['route-selected']).toEqual(['==', ['get', 'id'], 'route-2'])
+  })
+})

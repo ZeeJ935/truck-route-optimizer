@@ -9,6 +9,10 @@ export default defineConfig({
       '/api': 'http://127.0.0.1:8000',
     },
   },
+  build: {
+    // The lazily loaded map chunk is mostly the MapLibre library itself (~1 MB, ~290 kB gzip).
+    chunkSizeWarningLimit: 1100,
+  },
   test: {
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],

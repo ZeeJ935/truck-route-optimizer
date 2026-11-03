@@ -108,9 +108,11 @@ class FakeWeatherProvider:
         self._last_hour = last_hour
         self._error = error
         self.calls: list[tuple[list[LatLng], datetime, datetime]] = []
+        self.deadlines: list[float | None] = []
 
-    def hourly_forecast(self, locations, start_utc, end_utc):
+    def hourly_forecast(self, locations, start_utc, end_utc, deadline=None):
         self.calls.append((list(locations), start_utc, end_utc))
+        self.deadlines.append(deadline)
         if self._error is not None:
             raise self._error
         end = end_utc if self._last_hour is None else min(end_utc, self._last_hour)

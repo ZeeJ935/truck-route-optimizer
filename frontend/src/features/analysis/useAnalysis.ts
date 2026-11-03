@@ -34,5 +34,10 @@ export function useAnalysis() {
     }
   }, [])
 
-  return { state, submit, selectedRouteId, selectRoute: setSelectedRouteId }
+  // Drop a previous error as soon as the user edits the form or hits a new validation error.
+  const clearError = useCallback(() => {
+    setState((current) => (current.status === 'error' ? { status: 'idle' } : current))
+  }, [])
+
+  return { state, submit, clearError, selectedRouteId, selectRoute: setSelectedRouteId }
 }

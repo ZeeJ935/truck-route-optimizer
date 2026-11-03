@@ -132,8 +132,10 @@ def test_cached_locations_are_not_requested_again():
     ],
 )
 def test_failures_map_to_stable_errors(reply, error):
+    # The same reply twice: a 429 is retried once, every other failure is not retried.
+    provider = OpenMeteoWeatherProvider(FakeSession([reply, reply]), sleep=lambda seconds: None)
     with pytest.raises(error):
-        OpenMeteoWeatherProvider(FakeSession([reply])).hourly_forecast([(32.78, -96.8)], START, END)
+        provider.hourly_forecast([(32.78, -96.8)], START, END)
 
 
 def test_naive_window_rejected():
@@ -190,9 +192,9 @@ def test_same_coordinate_and_window_hits_the_cache_but_a_different_coordinate_mi
 
 
 def test_rate_limit_has_a_clear_retry_message():
-    session = FakeSession([FakeResponse(429, {"error": True, "reason": "Minutely API request limit exceeded"})])
+    session = FakeSession([TOO_MANY_REQUESTS, TOO_MANY_REQUESTS])
     with pytest.raises(ProviderRateLimited) as raised:
-        OpenMeteoWeatherProvider(session).hourly_forecast([(32.78, -96.8)], START, END)
+        OpenMeteoWeatherProvider(session, sleep=lambda seconds: None).hourly_forecast([(32.78, -96.8)], START, END)
     assert raised.value.code == "provider_rate_limited"
     assert raised.value.message == (
         "The weather service is receiving too many requests. Please wait about a minute and try again."
@@ -205,3 +207,99 @@ def test_rain_plus_showers_has_no_float_noise_at_a_threshold():
         [(32.78, -96.8)], START, END
     )
     assert [hour.rain_in_per_hour for hour in forecast.hours] == [0.1, 0.25, 0.25]
+
+
+# --- Bounded retry after a 429 (fake sleep and clock: nothing really waits) -----------
+
+TOO_MANY_REQUESTS = FakeResponse(429, {"error": True, "reason": "Minutely API request limit exceeded"})
+
+
+class FakeClock:
+    def __init__(self, start=1_000.0):
+        self.now = start
+        self.sleeps = []
+
+    def __call__(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+
+def scripted_session(*outcomes):
+    """Replies in order: 'ok' builds a valid batch response for the request, '429' rate-limits it."""
+    queue = list(outcomes)
+
+    def responder(url, params):
+        outcome = queue.pop(0)
+        return TOO_MANY_REQUESTS if outcome == "429" else window_responder(url, params)
+
+    return FakeSession(responder=responder)
+
+
+def batch_latitudes(session):
+    return [params["latitude"] for _, params in session.calls]
+
+
+LOCATIONS_250 = [(30 + i * 0.05, -100 + i * 0.05) for i in range(250)]  # 3 batches: 100, 100, 50
+
+
+def test_429_then_success_retries_once_after_30_seconds():
+    clock = FakeClock()
+    session = scripted_session("429", "ok")
+    provider = OpenMeteoWeatherProvider(session, sleep=clock.sleep, clock=clock)
+    [forecast] = provider.hourly_forecast([(32.78, -96.8)], START, END, deadline=clock.now + 100)
+    assert clock.sleeps == [30]
+    assert len(session.calls) == 2
+    assert len(forecast.hours) == 3
+
+
+def test_429_twice_returns_provider_rate_limited_after_one_retry():
+    clock = FakeClock()
+    session = scripted_session("429", "429")
+    provider = OpenMeteoWeatherProvider(session, sleep=clock.sleep, clock=clock)
+    with pytest.raises(ProviderRateLimited) as raised:
+        provider.hourly_forecast([(32.78, -96.8)], START, END, deadline=clock.now + 100)
+    assert raised.value.message.startswith("The weather service is receiving too many requests.")
+    assert clock.sleeps == [30]
+    assert len(session.calls) == 2
+
+
+def test_completed_batches_are_not_refetched():
+    clock = FakeClock()
+    # Batch 1 succeeds, batch 2 is rate limited, so batch 3 is not sent until the retry.
+    session = scripted_session("ok", "429", "ok", "ok")
+    provider = OpenMeteoWeatherProvider(session, sleep=clock.sleep, clock=clock)
+    forecasts = provider.hourly_forecast(LOCATIONS_250, START, END, deadline=clock.now + 100)
+
+    sent = batch_latitudes(session)
+    assert [len(batch.split(",")) for batch in sent] == [100, 100, 100, 50]
+    assert sent[1] == sent[2]  # the failed batch is retried
+    first_batch = sent[0]
+    assert sent.count(first_batch) == 1  # the completed batch is never requested again
+    assert clock.sleeps == [30]
+    assert len(forecasts) == 250
+    assert [(f.lat, f.lng) for f in forecasts] == [(round(a, 2), round(b, 2)) for a, b in LOCATIONS_250]
+
+
+def test_no_retry_when_the_deadline_leaves_no_time():
+    clock = FakeClock()
+    session = scripted_session("429", "ok")
+    provider = OpenMeteoWeatherProvider(session, sleep=clock.sleep, clock=clock)
+    with pytest.raises(ProviderRateLimited):
+        provider.hourly_forecast([(32.78, -96.8)], START, END, deadline=clock.now + 40)  # 30 s + 15 s margin > 40 s
+    assert clock.sleeps == []
+    assert len(session.calls) == 1
+
+
+def test_retry_only_when_it_fits_inside_the_120_second_limits():
+    from analysis.limits import (
+        ANALYSIS_TIME_BUDGET_SECONDS,
+        WEATHER_RETRY_DELAY_SECONDS,
+        WEATHER_RETRY_MARGIN_SECONDS,
+    )
+
+    assert ANALYSIS_TIME_BUDGET_SECONDS < 120
+    assert WEATHER_RETRY_DELAY_SECONDS == 30
+    assert WEATHER_RETRY_DELAY_SECONDS + WEATHER_RETRY_MARGIN_SECONDS < ANALYSIS_TIME_BUDGET_SECONDS

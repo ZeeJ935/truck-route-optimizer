@@ -35,7 +35,7 @@ from .eta import eta_at_mile
 from .forecast_matching import match_forecast_hour
 from .forecast_window import forecast_horizon_end, slider_timestamps, weather_window
 from .geometry import LatLng, haversine_miles, round_location
-from .limits import FORECAST_SLIDER_POSITIONS, SAME_PLACE_MAX_MILES
+from .limits import ANALYSIS_TIME_BUDGET_SECONDS, FORECAST_SLIDER_POSITIONS, SAME_PLACE_MAX_MILES
 from .request import AnalysisRequest
 from .route_selection import select_routes
 from .scoring import Recommendation, RiskSegment, RouteRiskSummary, rank_routes, summarize_route
@@ -161,6 +161,7 @@ class AnalysisService:
 
     def analyze(self, request: AnalysisRequest) -> AnalysisResult:
         started = time.perf_counter()
+        deadline = time.monotonic() + ANALYSIS_TIME_BUDGET_SECONDS
         departure = request.departure_utc
         timings: dict[str, float] = {}
 
@@ -194,7 +195,9 @@ class AnalysisService:
         window_start, window_end = weather_window(departure, latest_eta, forecast_horizon_end(self.now()))
         locations = budget.all_locations
         mark = time.perf_counter()
-        forecasts = self.weather.hourly_forecast(list(locations), window_start, window_end)
+        forecasts = self.weather.hourly_forecast(
+            list(locations), window_start, window_end, deadline=deadline
+        )
         timings["weather"] = time.perf_counter() - mark
         tables: dict[LatLng, HourlyTable] = {
             location: _complete_hours(forecast.hours) for location, forecast in zip(locations, forecasts)

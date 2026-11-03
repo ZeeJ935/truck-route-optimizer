@@ -13,7 +13,14 @@ from .types import LocationForecast
 
 class WeatherProvider(Protocol):
     def hourly_forecast(
-        self, locations: Sequence[LatLng], start_utc: datetime, end_utc: datetime
+        self,
+        locations: Sequence[LatLng],
+        start_utc: datetime,
+        end_utc: datetime,
+        deadline: float | None = None,
     ) -> list[LocationForecast]:
-        """Hourly forecasts from start_utc to end_utc inclusive, one per location, in input order."""
+        """Hourly forecasts from start_utc to end_utc inclusive, one per location, in input order.
+
+        ``deadline`` is a time.monotonic() value; any retry must still finish before it.
+        """
         ...

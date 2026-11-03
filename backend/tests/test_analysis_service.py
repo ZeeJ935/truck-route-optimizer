@@ -317,3 +317,15 @@ def test_corridor_and_checkpoint_risk_match_at_the_same_location_and_hour():
                     assert corridor[location].risk[hour] == int(checkpoint.assessment.level)
     assert comparisons > 10
     assert len({int(c.assessment.level) for r in result.routes for c in r.checkpoints}) > 1
+
+
+def test_weather_request_carries_a_deadline_inside_the_time_budget():
+    import time
+
+    from analysis.limits import ANALYSIS_TIME_BUDGET_SECONDS
+
+    weather = FakeWeatherProvider()
+    before = time.monotonic()
+    service(weather=weather).analyze(request())
+    [deadline] = weather.deadlines
+    assert before < deadline <= time.monotonic() + ANALYSIS_TIME_BUDGET_SECONDS

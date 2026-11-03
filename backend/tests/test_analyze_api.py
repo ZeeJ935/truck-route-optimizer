@@ -152,8 +152,11 @@ def test_service_errors_map_to_stable_codes_and_statuses(use_service, service_kw
 
 def test_open_meteo_429_returns_provider_rate_limited_with_retry_message(use_service):
     session = FakeSession(responder=lambda url, params: FakeResponse(429, {"error": True, "reason": "limit"}))
-    use_service(fake_service(weather=OpenMeteoWeatherProvider(session)))
+    sleeps = []
+    use_service(fake_service(weather=OpenMeteoWeatherProvider(session, sleep=sleeps.append)))
     response = post()
+    assert sleeps == [30]  # one bounded retry, then the error
+    assert len(session.calls) == 2
     assert response.status_code == 503
     assert response["Retry-After"] == "60"
     assert response.json()["error"] == {
@@ -171,7 +174,7 @@ def test_via_timeout_is_skipped_and_the_analysis_succeeds(use_service):
 
 def test_unexpected_error_returns_500_without_details(use_service, caplog):
     class Broken(FakeWeatherProvider):
-        def hourly_forecast(self, *args):
+        def hourly_forecast(self, *args, **kwargs):
             raise RuntimeError("secret internal detail")
 
     use_service(fake_service(weather=Broken()))

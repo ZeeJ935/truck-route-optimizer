@@ -24,3 +24,6 @@ Thumbs.db
 
 # Tooling artifacts
 .playwright-mcp/
+
+# Local screenshots (kept out of git)
+docs/screenshots/
