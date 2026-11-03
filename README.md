@@ -119,6 +119,76 @@ Returns the service status.
 { "status": "ok" }
 ```
 
+### `POST /api/routes/analyze`
+
+Request:
+
+```json
+{
+  "origin": "Dallas, TX",
+  "destination": "Denver, CO",
+  "departure_time": "2026-11-03T08:00:00+05:00",
+  "load_weight_lb": 40000,
+  "sampling_interval_miles": 25
+}
+```
+
+| Field | Rule |
+|---|---|
+| `origin`, `destination` | Required text, up to 200 characters. Both must geocode and must not resolve to the same place (within 0.5 mile). |
+| `departure_time` | ISO 8601 with an explicit offset (`+05:00` or `Z`). No earlier than 5 minutes ago and no later than the last forecast hour (16 days ahead). |
+| `load_weight_lb` | A number greater than 0. |
+| `sampling_interval_miles` | Exactly `10`, `25`, or `50`. |
+
+Response (abridged; all times are UTC, geometry is `[lng, lat]`):
+
+```json
+{
+  "routes": [
+    {
+      "id": "route-1", "rank": 1, "label": "Recommended", "status": "CAUTION",
+      "geometry": [[-96.79622, 32.77798]],
+      "distance_miles": 883.4, "duration_seconds": 43872,
+      "no_travel_miles": 0.0, "severe_miles": 8.0, "high_miles": 41.0, "average_risk": 0.74,
+      "checkpoints": [
+        {
+          "mile": 25.0, "lat": 32.9, "lng": -97.2, "eta": "2026-11-03T04:30:00Z", "segment_miles": 25.0,
+          "weather": { "forecast_time": "2026-11-03T05:00:00Z", "wind_mph": 18.2, "rain_in_per_hour": 0.02, "snow_in_per_hour": 0.0 },
+          "risk": 0, "risk_label": "Low", "reasons": []
+        }
+      ]
+    }
+  ],
+  "recommendation": { "route_id": "route-1", "reason": "Fewest Severe miles among the available routes.", "no_safe_route": false },
+  "route_notice": null,
+  "forecast": {
+    "timestamps": ["2026-11-03T03:00:00Z", "... 49 entries ..."],
+    "corridor": [{ "lat": 32.9, "lng": -97.2, "risk": [0, 0, 1, null, "... 49 entries ..."] }],
+    "available_hours": [0, 1, 2],
+    "notice": null
+  }
+}
+```
+
+- `forecast.timestamps[N]` is departure + N hours, for N from 0 to 48.
+- Each corridor `risk` array lines up with `forecast.timestamps`. `null` means no forecast for that hour, and `0` means Low.
+- Responses are gzip-compressed when the client accepts it.
+
+Errors use one envelope: `{"error": {"code": "...", "message": "...", "fields": {...}}}`. `fields` appears only on validation errors.
+
+| Code | HTTP | When |
+|---|---|---|
+| `validation_error` | 400 | Invalid input, malformed JSON, same origin and destination, or too many checkpoints for the weather budget |
+| `geocoding_failed` | 422 | A place could not be found |
+| `no_route_found` | 422 | No truck route exists between the places |
+| `forecast_unavailable` | 422 | A checkpoint ETA on a final route has no eligible forecast hour |
+| `provider_rate_limited` | 503 | A provider rate-limited the request. Includes `Retry-After: 60` |
+| `provider_timeout` | 504 | A provider did not respond in time |
+| `provider_error` | 502 | A provider failed or returned an unexpected response |
+| `internal_error` | 500 | An unexpected server error. Details are logged on the server only |
+
+Error messages never contain stack traces or raw provider responses.
+
 ## Risk rules
 
 Each checkpoint's wind, rain, and snow are classified separately. Lower bounds are inclusive.
@@ -148,6 +218,21 @@ A checkpoint's risk is the worst of the three hazards. A reason is kept for ever
 5. If more than 3 routes remain, keep the 3 fastest.
 
 Routes are never copied or altered to look distinct. When fewer than 3 routes remain, the response says so, for example: "Only 2 distinct routes were available for this trip."
+
+Via-point attempts are optional extras. If one times out or fails after a route has already been accepted, the failure is logged, that attempt is skipped, and the accepted routes are kept. If the routing provider rate-limits a via attempt, no further via attempts are made. Only a failure of the first routing request fails the analysis.
+
+## Weather window and location budget
+
+- **Forecast window.** One weather request batch covers every checkpoint ETA, even ETAs more than 48 hours after departure, plus the 48-hour heatmap window. The window is widened by the 30-minute match rule and clamped to the provider's last forecast hour. The heatmap slider always covers hours 0 to 48 only.
+- **Missing forecasts.** If any checkpoint ETA on a final route has no eligible forecast hour, the analysis fails with `forecast_unavailable`. An hour with any missing value counts as missing, never as Low.
+- **Location budget.** Open-Meteo counts each location as one call, so one analysis requests at most 550 distinct locations. The budget is applied in this order:
+  1. Remove duplicate checkpoint locations across routes first. Coordinates are rounded to 2 decimals.
+  2. Reserve at least 100 corridor locations, so the heatmap is never empty.
+  3. Checkpoints may use the rest of the 550-location ceiling, which is up to 450.
+  4. Any budget left after checkpoints goes back to the corridor, up to 250. Corridor points are thinned evenly to fit.
+  5. If the checkpoints still don't fit, the request is rejected with `validation_error`, and the message suggests a larger sampling interval. Checkpoints are never dropped.
+- **Heatmap corridor.** Each route gets a point every 25 miles, plus one 10 miles to each side, perpendicular to the direction of travel. Points shared between routes are counted once.
+- **Concurrent analyses.** Two analyses started within the same minute from the same server can still exceed Open-Meteo's 600-calls-per-minute limit. The second one then fails with `provider_rate_limited` and a message asking the user to retry in about a minute.
 
 ## Distance basis
 
@@ -195,6 +280,8 @@ Each route also gets a status:
 - **Weather values.** Open-Meteo's `rain`, `showers`, and `snowfall` are totals for the preceding hour. They are used as the hourly rate. Rain is `rain + showers`, and wind is the sustained 10 m wind speed, not gusts.
 - **Heatmap corridor.** Each route is sampled every 25 miles, with one centre point and one point 10 miles to each side. Points shared between routes are deduplicated.
 - **Weather location limits.** The corridor is capped at 250 points, and one analysis requests at most 550 distinct weather locations (`backend/analysis/limits.py`). Open-Meteo counts each location as one call and allows 600 calls per minute, so these limits keep one analysis inside that budget.
+- **Same place.** An origin and destination that geocode within 0.5 mile of each other are treated as the same place.
+- **Weather lookup points.** Weather is looked up at coordinates rounded to 2 decimals, which moves a point by at most about 0.4 mile.
 - **Route labels.** Routes after the first are labelled "Alternative".
 
 ## Data providers and limitations

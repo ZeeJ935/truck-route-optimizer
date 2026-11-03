@@ -18,24 +18,24 @@ from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from analysis.geometry import LatLng
+from analysis.geometry import LatLng, round_location
 from analysis.limits import PROVIDER_TIMEOUT_SECONDS, WEATHER_BATCH_SIZE, WEATHER_COORD_DECIMALS
 from analysis.time_utils import require_aware
 from core.cache import TTLCache
-from core.errors import ProviderError
+from core.errors import ProviderError, ProviderRateLimited
 from core.http import HttpSession, get_json
 
 from .types import HourlyWeather, LocationForecast
 
 OPEN_METEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 PROVIDER_NAME = "Open-Meteo"
+RATE_LIMIT_MESSAGE = (
+    "The weather service is receiving too many requests. Please wait about a minute and try again."
+)
 
 HOURLY_VARIABLES = ("wind_speed_10m", "rain", "showers", "snowfall")
+PRECIPITATION_SUM_DECIMALS = 6
 EXPECTED_UNITS = {"wind_speed_10m": "mp/h", "rain": "inch", "showers": "inch", "snowfall": "inch"}
-
-
-def round_location(point: LatLng) -> LatLng:
-    return (round(point[0], WEATHER_COORD_DECIMALS), round(point[1], WEATHER_COORD_DECIMALS))
 
 
 def _floor_hour(value: datetime) -> datetime:
@@ -57,6 +57,12 @@ def _optional_number(value: Any) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
         raise ProviderError("Open-Meteo returned an invalid weather value.")
     return float(value)
+
+
+def _sum_precipitation(first: float, second: float) -> float:
+    # Provider values have at most a few decimals; rounding removes binary float
+    # noise (0.07 + 0.03 = 0.09999999999999999) that could cross a risk threshold.
+    return round(first + second, PRECIPITATION_SUM_DECIMALS)
 
 
 def _parse_location(raw: Any) -> tuple[HourlyWeather, ...]:
@@ -91,7 +97,7 @@ def _parse_location(raw: Any) -> tuple[HourlyWeather, ...]:
             HourlyWeather(
                 time_utc=time_utc,
                 wind_mph=_optional_number(columns["wind_speed_10m"][index]),
-                rain_in_per_hour=None if rain is None or showers is None else rain + showers,
+                rain_in_per_hour=None if rain is None or showers is None else _sum_precipitation(rain, showers),
                 snow_in_per_hour=_optional_number(columns["snowfall"][index]),
             )
         )
@@ -159,7 +165,10 @@ class OpenMeteoWeatherProvider:
             "start_hour": window[0],
             "end_hour": window[1],
         }
-        body = get_json(self._session, self._url, params, timeout=self._timeout, provider=PROVIDER_NAME)
+        try:
+            body = get_json(self._session, self._url, params, timeout=self._timeout, provider=PROVIDER_NAME)
+        except ProviderRateLimited:
+            raise ProviderRateLimited(RATE_LIMIT_MESSAGE) from None
         # One location returns an object; several return a list in request order.
         items = [body] if isinstance(body, dict) else body
         if not isinstance(items, list) or len(items) != len(batch):

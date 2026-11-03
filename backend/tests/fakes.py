@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from analysis.geometry import LatLng, cumulative_miles
-from core.errors import NoRouteFound
+from core.errors import GeocodingFailed, NoRouteFound
+from risk.engine import RiskEngine
 from routing.normalization import normalize_route
-from routing.types import NormalizedRoute
+from routing.types import GeocodedPlace, NormalizedRoute
+from weather.types import HourlyWeather, LocationForecast
 
 _NO_JSON = object()
 
@@ -70,3 +73,70 @@ class FakeRoutingProvider:
         if isinstance(response, BaseException):
             raise response
         return list(response)
+
+
+# --- Analysis fakes ------------------------------------------------------------
+
+class FakeGeocoder:
+    def __init__(self, places: dict[str, LatLng]):
+        self._places = places
+        self.calls: list[str] = []
+
+    def geocode(self, query: str) -> GeocodedPlace:
+        self.calls.append(query)
+        if query not in self._places:
+            raise GeocodingFailed(f'"{query}" could not be found.')
+        lat, lng = self._places[query]
+        return GeocodedPlace(query=query, name=query, lat=lat, lng=lng)
+
+
+WeatherFn = Callable[[float, float, datetime], tuple[float, float, float] | None]
+
+
+def calm_weather(lat: float, lng: float, time_utc: datetime) -> tuple[float, float, float]:
+    return (5.0, 0.0, 0.0)
+
+
+class FakeWeatherProvider:
+    """Hourly forecasts from a function of (lat, lng, hour). ``None`` from the function means no data.
+
+    ``last_hour`` simulates the provider's forecast horizon: later hours are not returned.
+    """
+
+    def __init__(self, values: WeatherFn = calm_weather, last_hour: datetime | None = None, error=None):
+        self._values = values
+        self._last_hour = last_hour
+        self._error = error
+        self.calls: list[tuple[list[LatLng], datetime, datetime]] = []
+
+    def hourly_forecast(self, locations, start_utc, end_utc):
+        self.calls.append((list(locations), start_utc, end_utc))
+        if self._error is not None:
+            raise self._error
+        end = end_utc if self._last_hour is None else min(end_utc, self._last_hour)
+        forecasts = []
+        for lat, lng in locations:
+            hours = []
+            current = start_utc.astimezone(UTC).replace(minute=0, second=0, microsecond=0)
+            while current <= end:
+                values = self._values(lat, lng, current)
+                wind, rain, snow = values if values is not None else (None, None, None)
+                hours.append(HourlyWeather(current, wind, rain, snow))
+                current += timedelta(hours=1)
+            forecasts.append(LocationForecast(lat=lat, lng=lng, hours=tuple(hours)))
+        return forecasts
+
+    @property
+    def requested_locations(self) -> list[LatLng]:
+        return [location for locations, _, _ in self.calls for location in locations]
+
+
+class SpyRiskEngine(RiskEngine):
+    """The real RiskEngine, recording every call."""
+
+    def __init__(self):
+        self.calls: list[tuple[float, float, float, float]] = []
+
+    def assess(self, wind_mph, rain_in_per_hour, snow_in_per_hour, load_weight_lb):
+        self.calls.append((wind_mph, rain_in_per_hour, snow_in_per_hour, load_weight_lb))
+        return super().assess(wind_mph, rain_in_per_hour, snow_in_per_hour, load_weight_lb)

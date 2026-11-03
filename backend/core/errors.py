@@ -19,6 +19,10 @@ class ValidationFailed(ServiceError):
     code = "validation_error"
     default_message = "The request is invalid."
 
+    def __init__(self, message: str | None = None, fields: dict[str, str] | None = None):
+        super().__init__(message)
+        self.fields = dict(fields or {})
+
 
 class GeocodingFailed(ServiceError):
     code = "geocoding_failed"

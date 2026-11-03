@@ -28,6 +28,7 @@ def normalize_route(
     duration_seconds: float,
     progress: Sequence[tuple[float, float]],
     source: str,
+    travel_modes: Sequence[str] = (),
 ) -> NormalizedRoute:
     """``progress`` is (miles, seconds) pairs cumulative from the route start."""
     _require_positive("distance", distance_miles)
@@ -68,4 +69,5 @@ def normalize_route(
         duration_seconds=float(duration_seconds),
         progress=tuple(scaled_progress),
         source=source,
+        travel_modes=tuple(travel_modes),
     )

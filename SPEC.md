@@ -238,6 +238,14 @@ Never duplicate a route or alter geometry to make it look distinct. If fewer tha
 
 Corridor default, documented as an assumption: sample each final route every 25 miles, with one center point and one point 10 miles to each side. Reduce density evenly if the set exceeds 250 points (`CORRIDOR_MAX_POINTS` in `backend/analysis/limits.py`). Deduplicate shared points between routes.
 
+Weather location budget per analysis (ceiling: 550 distinct locations, `MAX_WEATHER_LOCATIONS_PER_ANALYSIS`). Apply in this order:
+
+1. Remove duplicate checkpoint locations across routes first.
+2. Reserve at least 100 corridor locations so the heatmap is never empty.
+3. Checkpoints may use the rest of the 550-location ceiling.
+4. Give any budget left after checkpoints back to the corridor, up to 250.
+5. If checkpoints still don't fit, reject the request with `validation_error` and suggest a larger sampling interval. Never drop checkpoints.
+
 The 250-point cap replaces an earlier 600-point default. It comes from the measured Open-Meteo free limit. Each location in a request counts as one call, and the limit is 600 calls per minute per IP: a 7th 100-location request within one minute returned HTTP 429. A 600-point corridor plus checkpoints would not fit in one analysis.
 
 ## 1.13 Backend and frontend responsibilities

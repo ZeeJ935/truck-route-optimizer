@@ -10,12 +10,13 @@ Routes are never duplicated or altered to look distinct.
 
 from __future__ import annotations
 
+import logging
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
-from core.errors import NoRouteFound
+from core.errors import NoRouteFound, ProviderRateLimited, ServiceError
 from routing.providers import RoutingProvider
 from routing.types import NormalizedRoute
 
@@ -23,6 +24,7 @@ from .geometry import LatLng
 from .limits import MAX_DURATION_RATIO, MAX_ROUTES, PROVIDER_MAX_ALTERNATIVES, VIA_OFFSET_FRACTIONS
 from .route_similarity import are_duplicates, sample_points
 
+logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class RouteSelection:
@@ -114,6 +116,25 @@ def select_routes(
             via_routes = routing.calculate_routes(origin, destination, departure_utc, load_weight_lb, 0, via=(via,))
         except NoRouteFound:
             # The via point could not be routed (e.g. it fell in water); try the next one.
+            continue
+        except ProviderRateLimited:
+            if not accepted:
+                raise
+            # At least one route is already accepted. Keep it, and stop asking a
+            # provider that is rate limiting us.
+            logger.warning("Via-point attempt %d was rate limited; keeping %d accepted route(s).", attempts, len(accepted))
+            break
+        except ServiceError as error:
+            if not accepted:
+                raise
+            # Timeouts and provider errors on an optional via attempt never fail
+            # the analysis once a route has been accepted.
+            logger.warning(
+                "Via-point attempt %d failed (%s); skipping it and keeping %d accepted route(s).",
+                attempts,
+                error.code,
+                len(accepted),
+            )
             continue
         candidates.extend(via_routes)
         accepted = selector.dedupe_and_filter(candidates)

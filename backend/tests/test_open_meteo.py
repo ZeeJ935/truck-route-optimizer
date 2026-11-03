@@ -139,3 +139,69 @@ def test_failures_map_to_stable_errors(reply, error):
 def test_naive_window_rejected():
     with pytest.raises(ValueError):
         OpenMeteoWeatherProvider(FakeSession()).hourly_forecast([(32.78, -96.8)], datetime(2026, 11, 3), END)
+
+
+# --- Window-aware cache, rate limit, precipitation sums ---------------------------------
+
+
+def window_responder(url, params):
+    """Returns hourly data covering exactly the requested start_hour..end_hour for each location."""
+    start = datetime.strptime(params["start_hour"], "%Y-%m-%dT%H:%M")
+    end = datetime.strptime(params["end_hour"], "%Y-%m-%dT%H:%M")
+    times = []
+    current = start
+    while current <= end:
+        times.append(current.strftime("%Y-%m-%dT%H:%M"))
+        current += timedelta(hours=1)
+    count = len(params["latitude"].split(","))
+    body = {
+        "utc_offset_seconds": 0,
+        "hourly_units": dict(UNITS),
+        "hourly": {
+            "time": times,
+            "wind_speed_10m": [5.0] * len(times),
+            "rain": [0.0] * len(times),
+            "showers": [0.0] * len(times),
+            "snowfall": [0.0] * len(times),
+        },
+    }
+    return FakeResponse(200, body if count == 1 else [body] * count)
+
+
+def test_cached_shorter_window_is_not_reused_for_a_longer_window():
+    session = FakeSession(responder=window_responder)
+    provider = OpenMeteoWeatherProvider(session, cache=TTLCache(600))
+    short = provider.hourly_forecast([(32.0, -97.0)], START, START + timedelta(hours=2))[0]
+    long = provider.hourly_forecast([(32.0, -97.0)], START, START + timedelta(hours=60))[0]
+    assert len(session.calls) == 2
+    assert len(short.hours) == 3
+    assert [hour.time_utc for hour in long.hours] == [START + timedelta(hours=n) for n in range(61)]
+
+
+def test_same_coordinate_and_window_hits_the_cache_but_a_different_coordinate_misses():
+    session = FakeSession(responder=window_responder)
+    provider = OpenMeteoWeatherProvider(session, cache=TTLCache(600))
+    provider.hourly_forecast([(32.0, -97.0)], START, END)
+    provider.hourly_forecast([(32.0, -97.0)], START + timedelta(minutes=10), END)  # same whole-hour window
+    assert len(session.calls) == 1
+    provider.hourly_forecast([(32.1, -97.0)], START, END)
+    provider.hourly_forecast([(32.0, -97.0)], START - timedelta(hours=1), END)
+    assert len(session.calls) == 3
+
+
+def test_rate_limit_has_a_clear_retry_message():
+    session = FakeSession([FakeResponse(429, {"error": True, "reason": "Minutely API request limit exceeded"})])
+    with pytest.raises(ProviderRateLimited) as raised:
+        OpenMeteoWeatherProvider(session).hourly_forecast([(32.78, -96.8)], START, END)
+    assert raised.value.code == "provider_rate_limited"
+    assert raised.value.message == (
+        "The weather service is receiving too many requests. Please wait about a minute and try again."
+    )
+
+
+def test_rain_plus_showers_has_no_float_noise_at_a_threshold():
+    body = location_body(rain=(0.07, 0.2, 0.15), showers=(0.03, 0.05, 0.1), wind=(1, 1, 1))
+    [forecast] = OpenMeteoWeatherProvider(FakeSession([FakeResponse(200, body)])).hourly_forecast(
+        [(32.78, -96.8)], START, END
+    )
+    assert [hour.rain_in_per_hour for hour in forecast.hours] == [0.1, 0.25, 0.25]

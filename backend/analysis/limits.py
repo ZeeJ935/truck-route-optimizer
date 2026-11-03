@@ -73,3 +73,16 @@ WEATHER_COORD_DECIMALS = 2
 
 # Open-Meteo forecasts reach 16 days ahead.
 WEATHER_FORECAST_HORIZON_DAYS = 16
+
+# --- Analysis -------------------------------------------------------------------
+
+# The corridor always keeps at least this many weather locations, so the heatmap
+# is never empty; checkpoints may use the rest of MAX_WEATHER_LOCATIONS_PER_ANALYSIS.
+CORRIDOR_MIN_RESERVED_POINTS = 100
+MAX_CHECKPOINT_LOCATIONS = MAX_WEATHER_LOCATIONS_PER_ANALYSIS - CORRIDOR_MIN_RESERVED_POINTS
+
+# Origin and destination closer than this are treated as the same place.
+SAME_PLACE_MAX_MILES = 0.5
+
+# Longest accepted origin or destination text.
+MAX_PLACE_QUERY_LENGTH = 200

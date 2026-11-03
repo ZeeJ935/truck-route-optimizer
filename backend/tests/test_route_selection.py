@@ -138,10 +138,36 @@ def test_provider_failures_propagate_from_primary_request(error):
         run(FakeRoutingProvider(error))
 
 
-@pytest.mark.parametrize("error", [ProviderTimeout(), ProviderRateLimited(), ProviderError()])
-def test_provider_failures_propagate_from_via_request(error):
-    with pytest.raises(type(error)):
-        run(FakeRoutingProvider([make_route(STRAIGHT, 100)], via_responses=[error]))
+@pytest.mark.parametrize("error", [ProviderTimeout(), ProviderError()])
+def test_failed_via_attempt_is_logged_skipped_and_accepted_routes_kept(error, caplog):
+    provider = FakeRoutingProvider(
+        [make_route(STRAIGHT, 100)],
+        via_responses=[error, [make_route(EAST, 110)], [make_route(WEST, 120)]],
+    )
+    selection = run(provider)
+    assert geometries(selection) == [tuple(STRAIGHT), tuple(EAST), tuple(WEST)]
+    assert selection.via_attempts == 3  # the failed attempt is skipped, later ones still run
+    assert f"failed ({error.code})" in caplog.text
+
+
+@pytest.mark.parametrize("error", [ProviderTimeout(), ProviderError()])
+def test_every_via_attempt_failing_still_returns_accepted_routes(error):
+    provider = FakeRoutingProvider([make_route(STRAIGHT, 100), make_route(EAST, 110)], via_responses=[error] * 4)
+    selection = run(provider)
+    assert len(selection.routes) == 2
+    assert selection.notice == "Only 2 distinct routes were available for this trip."
+
+
+def test_rate_limited_via_attempt_stops_further_via_requests(caplog):
+    provider = FakeRoutingProvider(
+        [make_route(STRAIGHT, 100)],
+        via_responses=[[make_route(EAST, 110)], ProviderRateLimited(), [make_route(WEST, 120)]],
+    )
+    selection = run(provider)
+    assert geometries(selection) == [tuple(STRAIGHT), tuple(EAST)]
+    assert selection.via_attempts == 2
+    assert len(provider.calls) == 3  # primary + 2 via; no request after the rate limit
+    assert "rate limited" in caplog.text
 
 
 def test_via_points_are_perpendicular_offsets_from_the_midpoint():

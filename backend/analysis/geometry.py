@@ -6,6 +6,8 @@ import math
 from bisect import bisect_left
 from collections.abc import Sequence
 
+from .limits import WEATHER_COORD_DECIMALS
+
 EARTH_RADIUS_MILES = 3958.7613
 
 LatLng = tuple[float, float]
@@ -48,3 +50,31 @@ def point_at_mile(polyline: Sequence[LatLng], cumulative: Sequence[float], mile:
         start[0] + (end[0] - start[0]) * fraction,
         start[1] + (end[1] - start[1]) * fraction,
     )
+
+
+def bearing_degrees(a: LatLng, b: LatLng) -> float:
+    """Initial great-circle bearing from a to b, in degrees clockwise from north."""
+    lat1, lat2 = math.radians(a[0]), math.radians(b[0])
+    dlng = math.radians(b[1] - a[1])
+    x = math.sin(dlng) * math.cos(lat2)
+    y = math.cos(lat1) * math.sin(lat2) - math.sin(lat1) * math.cos(lat2) * math.cos(dlng)
+    return math.degrees(math.atan2(x, y)) % 360
+
+
+def destination_point(start: LatLng, bearing: float, miles: float) -> LatLng:
+    """The point ``miles`` from ``start`` along ``bearing`` (degrees from north)."""
+    angular = miles / EARTH_RADIUS_MILES
+    theta = math.radians(bearing)
+    lat1, lng1 = math.radians(start[0]), math.radians(start[1])
+    lat2 = math.asin(math.sin(lat1) * math.cos(angular) + math.cos(lat1) * math.sin(angular) * math.cos(theta))
+    lng2 = lng1 + math.atan2(
+        math.sin(theta) * math.sin(angular) * math.cos(lat1),
+        math.cos(angular) - math.sin(lat1) * math.sin(lat2),
+    )
+    return (math.degrees(lat2), (math.degrees(lng2) + 540) % 360 - 180)
+
+
+def round_location(point: LatLng, decimals: int | None = None) -> LatLng:
+    """Round a coordinate for weather lookup; identical rounded points share one forecast."""
+    places = WEATHER_COORD_DECIMALS if decimals is None else decimals
+    return (round(point[0], places), round(point[1], places))

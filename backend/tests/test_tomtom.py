@@ -217,3 +217,56 @@ def test_departure_is_sent_in_utc():
     provider, session = routing([FakeResponse(200, route_body())])
     provider.calculate_routes(ORIGIN, DESTINATION, datetime(2026, 11, 3, 3, 0, 30, 999, tzinfo=UTC), 1, 0)
     assert session.calls[0][1]["departAt"] == "2026-11-03T03:00:30Z"
+
+
+# --- Route cache keys ---------------------------------------------------------------
+
+
+def cached_router():
+    session = FakeSession(responder=lambda url, params: FakeResponse(200, route_body()))
+    return TomTomRoutingProvider(API_KEY, session, cache=TTLCache(600)), session
+
+
+BASE_CALL = {
+    "origin": ORIGIN,
+    "destination": DESTINATION,
+    "departure_utc": datetime(2026, 11, 3, 3, 0, tzinfo=UTC),
+    "load_weight_lb": 40_000,
+    "max_alternatives": 2,
+    "via": (),
+}
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"origin": (32.7781, -96.7962)},
+        {"destination": (35.4677, -97.5164)},
+        {"departure_utc": datetime(2026, 11, 3, 4, 0, tzinfo=UTC)},
+        {"departure_utc": datetime(2026, 11, 3, 3, 0, 0, 1, tzinfo=UTC)},  # same departAt second, different instant
+        {"load_weight_lb": 30_000},
+        {"load_weight_lb": 40_000.4},  # rounds to the same whole kg as 40,000 lb
+        {"via": ((33.9, -98.5),)},
+        {"via": ((33.9, -98.6),)},
+        {"max_alternatives": 0},
+    ],
+)
+def test_any_change_to_route_inputs_misses_the_cache(change):
+    provider, session = cached_router()
+    provider.calculate_routes(**BASE_CALL)
+    provider.calculate_routes(**{**BASE_CALL, **change})
+    assert len(session.calls) == 2
+
+
+def test_identical_route_request_hits_the_cache():
+    provider, session = cached_router()
+    first = provider.calculate_routes(**BASE_CALL)
+    same_instant_other_offset = BASE_CALL["departure_utc"].astimezone(timezone(timedelta(hours=5)))
+    second = provider.calculate_routes(**{**BASE_CALL, "departure_utc": same_instant_other_offset})
+    assert second == first
+    assert len(session.calls) == 1
+
+
+def test_route_travel_modes_are_recorded():
+    provider, _ = routing([FakeResponse(200, route_body(travel_mode="truck"))])
+    assert route(provider)[0].travel_modes == ("truck",)

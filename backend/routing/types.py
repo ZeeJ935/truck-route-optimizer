@@ -35,3 +35,6 @@ class NormalizedRoute:
     duration_seconds: float
     progress: tuple[ProgressPoint, ...]
     source: str  # "provider" or "via"
+    # Travel mode of each TRAVEL_MODE section the provider reported ("truck", or
+    # "other" where truck restrictions could not be applied). Internal only.
+    travel_modes: tuple[str, ...] = ()

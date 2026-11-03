@@ -154,7 +154,18 @@ class TomTomRoutingProvider:
             "sectionType": "travelMode",
             "traffic": "true",
         }
-        cache_key = ("route", locations, tuple(sorted((k, str(v)) for k, v in params.items())))
+        # The key holds every input that can change the route: origin, destination,
+        # via points, the exact departure instant and load (not just the rounded
+        # values sent to TomTom), and every request parameter.
+        cache_key = (
+            "route",
+            tuple(origin),
+            tuple(destination),
+            tuple(tuple(point) for point in via),
+            departure_utc.astimezone(UTC).isoformat(),
+            float(load_weight_lb),
+            tuple(sorted((k, str(v)) for k, v in params.items())),
+        )
         if self._cache is not None:
             cached = self._cache.get(cache_key)
             if cached is not None:
@@ -205,12 +216,14 @@ class TomTomRoutingProvider:
         except (KeyError, TypeError):
             raise ProviderError() from None
 
-        for section in raw.get("sections") or []:
-            if isinstance(section, dict) and section.get("sectionType") == "TRAVEL_MODE":
-                if section.get("travelMode") != "truck":
-                    logger.warning(
-                        "TomTom could not apply truck mode on part of a route (travelMode=%s).",
-                        section.get("travelMode"),
-                    )
+        travel_modes = tuple(
+            str(section.get("travelMode"))
+            for section in raw.get("sections") or []
+            if isinstance(section, dict) and section.get("sectionType") == "TRAVEL_MODE"
+        )
+        if any(mode != "truck" for mode in travel_modes):
+            logger.warning("TomTom could not apply truck mode on part of a route (travel modes: %s).", travel_modes)
 
-        return normalize_route(points, meters_to_miles(length_m), travel_s, progress, source)
+        return normalize_route(
+            points, meters_to_miles(length_m), travel_s, progress, source, travel_modes=travel_modes
+        )
