@@ -259,3 +259,61 @@ def test_weather_rate_limit_propagates():
     weather = FakeWeatherProvider(error=ProviderRateLimited("wait"))
     with pytest.raises(ProviderRateLimited):
         service(weather=weather).analyze(request())
+
+
+# --- Stage timings, concurrent geocoding, checkpoint/corridor consistency ----------------
+
+
+def test_stage_timings_are_recorded():
+    stats = service(routes=(STRAIGHT,)).analyze(request()).stats
+    assert set(stats.timings) == {"geocoding", "routing", "via", "weather", "risk", "ranking"}
+    assert all(value >= 0 for value in stats.timings.values())
+    assert stats.timings["via"] > 0  # one route left, so via attempts ran
+
+
+def test_geocoding_errors_surface_origin_first():
+    from core.errors import GeocodingFailed
+
+    # Both places unknown: the origin's error is the one reported, as with sequential calls.
+    svc = service(places={"Elsewhere": (40.0, -100.0)})
+    with pytest.raises(GeocodingFailed) as raised:
+        svc.analyze(request())
+    assert '"Origin"' in raised.value.message
+
+    only_destination_unknown = service(places={"Origin": ORIGIN})
+    with pytest.raises(GeocodingFailed) as raised:
+        only_destination_unknown.analyze(request())
+    assert '"Destination"' in raised.value.message
+
+
+def location_and_hour_weather(lat, lng, time_utc):
+    """Varies by place and hour so a mismatch between corridor and checkpoint lookups would show."""
+    hour = int(hours_since_midnight(time_utc))
+    wind = (abs(lat * 7 + lng * 3) * 5 + hour * 4) % 70
+    rain = ((hour * 13 + int(abs(lat) * 10)) % 12) / 10
+    return (wind, rain, 0.0)
+
+
+def test_corridor_and_checkpoint_risk_match_at_the_same_location_and_hour():
+    from analysis.geometry import round_location
+    from analysis.service import _complete_hours, _match
+
+    weather = FakeWeatherProvider(location_and_hour_weather)
+    result = service(weather=weather).analyze(request(interval=25))
+    forecasts = dict(zip(weather.calls[0][0], weather.hourly_forecast(weather.calls[0][0], weather.calls[0][1], weather.calls[0][2])))
+    corridor = {(point.lat, point.lng): point for point in result.forecast.corridor}
+
+    comparisons = 0
+    for route in result.routes:
+        for checkpoint in route.checkpoints:
+            location = round_location((checkpoint.lat, checkpoint.lng))
+            if location not in corridor:
+                continue
+            table = _complete_hours(forecasts[location].hours)
+            for hour, timestamp in enumerate(result.forecast.timestamps):
+                matched = _match(timestamp, table)
+                if matched is not None and matched.time_utc == checkpoint.weather.time_utc:
+                    comparisons += 1
+                    assert corridor[location].risk[hour] == int(checkpoint.assessment.level)
+    assert comparisons > 10
+    assert len({int(c.assessment.level) for r in result.routes for c in r.checkpoints}) > 1

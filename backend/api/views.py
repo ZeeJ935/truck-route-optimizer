@@ -1,4 +1,5 @@
 import logging
+import time
 
 from rest_framework.decorators import api_view
 from rest_framework.exceptions import APIException, ParseError, UnsupportedMediaType
@@ -36,6 +37,23 @@ def error_response(error: ServiceError) -> Response:
     return response
 
 
+def log_timings(stats, serialization_seconds: float) -> None:
+    """One line per analysis with stage timings and counts. No place names, URLs, or keys."""
+    stages = " ".join(
+        f"{stage}={stats.timings.get(stage, 0.0):.2f}s"
+        for stage in ("geocoding", "routing", "via", "weather", "risk", "ranking")
+    )
+    logger.info(
+        "analysis timings: %s serialization=%.2fs total=%.2fs routes=%d via_attempts=%d weather_locations=%d",
+        stages,
+        serialization_seconds,
+        stats.elapsed_seconds + serialization_seconds,
+        stats.final_route_count,
+        stats.via_attempts,
+        stats.weather_locations,
+    )
+
+
 @api_view(["GET"])
 def health(request: Request) -> Response:
     return Response({"status": "ok"})
@@ -51,7 +69,11 @@ def analyze_routes(request: Request) -> Response:
         service = wiring.get_analysis_service()
         analysis_request = parse_analysis_request(payload, now=service.now)
         result = service.analyze(analysis_request)
-        return Response(present_analysis(result))
+        mark = time.perf_counter()
+        body = present_analysis(result)
+        serialization = time.perf_counter() - mark
+        log_timings(result.stats, serialization)
+        return Response(body)
     except ServiceError as error:
         logger.info("Analysis failed with %s: %s", error.code, error.message)
         return error_response(error)

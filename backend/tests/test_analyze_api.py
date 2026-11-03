@@ -208,3 +208,18 @@ def test_responses_are_gzipped_when_the_client_accepts_it(use_service):
     response = Client().post(URL, data=json.dumps(BODY), content_type="application/json", HTTP_ACCEPT_ENCODING="gzip")
     assert response.status_code == 200
     assert response["Content-Encoding"] == "gzip"
+
+
+def test_timings_are_logged_without_place_names_or_keys(use_service, caplog, settings):
+    import logging
+
+    settings.TOMTOM_API_KEY = "never-log-this-key"
+    caplog.set_level(logging.INFO)
+    use_service(fake_service())
+    assert post().status_code == 200
+    lines = [record.getMessage() for record in caplog.records if "analysis timings" in record.getMessage()]
+    assert len(lines) == 1
+    for stage in ("geocoding=", "routing=", "via=", "weather=", "risk=", "ranking=", "serialization=", "total="):
+        assert stage in lines[0]
+    assert "Origin" not in lines[0] and "Destination" not in lines[0]
+    assert "never-log-this-key" not in caplog.text

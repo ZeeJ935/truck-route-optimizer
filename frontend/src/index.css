@@ -1,10 +1,62 @@
 :root {
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  color: #1f2933;
-  background: #ffffff;
+  --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+
+  --color-bg: #f4f6f8;
+  --color-surface: #ffffff;
+  --color-surface-muted: #f8fafc;
+  --color-border: #dde3ea;
+  --color-text: #1b2430;
+  --color-text-muted: #5b6776;
+  --color-accent: #1f5fbf;
+  --color-accent-strong: #174a96;
+  --color-focus: #f5b301;
+
+  --color-safe: #1d7a46;
+  --color-safe-bg: #e3f4ea;
+  --color-caution: #8a5a00;
+  --color-caution-bg: #fff2d6;
+  --color-danger: #a8231b;
+  --color-danger-bg: #fde5e2;
+  --color-info-bg: #e8f0fb;
+
+  /* Risk scale: Low, Moderate, High, Severe, No Travel. Always shown with a text label. */
+  --risk-0: #2e8b57;
+  --risk-1: #c9a400;
+  --risk-2: #e07b00;
+  --risk-3: #d1342a;
+  --risk-4: #6e1b8f;
+
+  --radius: 8px;
+  --shadow: 0 1px 2px rgb(16 24 40 / 6%), 0 1px 3px rgb(16 24 40 / 10%);
+
+  font-family: var(--font-sans);
+  color: var(--color-text);
+  background: var(--color-bg);
+  line-height: 1.45;
+}
+
+* {
+  box-sizing: border-box;
 }
 
 body {
   margin: 0;
-  padding: 16px;
+  min-width: 320px;
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+:focus-visible {
+  outline: 3px solid var(--color-focus);
+  outline-offset: 2px;
 }

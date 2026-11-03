@@ -21,6 +21,8 @@ The driver enters an origin, a destination, a departure time, and a load weight.
 
 - **The backend owns every business decision.** It calculates risk, mileage by risk tier, average risk, route status, ranking, the recommendation, and the global warning. It also writes the display text for reasons and recommendations.
 - **The frontend only renders those results.** It holds no thresholds, load rules, or ranking logic. It maps risk values to colours and labels, and selects the forecast hour.
+- **Frontend validation is for usability only.** The frontend checks required fields, a departure that isn't in the past, a positive load, and the interval. The backend validates every request again and is the authority. Backend field errors appear under the matching inputs.
+- **Switching routes makes no network request.** Changing the selected route uses data already loaded.
 - **One shared `RiskEngine`.** Checkpoints and the heatmap both use `risk/engine.py`. Every threshold lives in `risk/thresholds.py`.
 - **Pure logic modules.** Checkpoint placement, ETAs, forecast matching, and scoring have no I/O or framework code, so they are tested without the network.
 - **Provider interfaces.** Routing, geocoding, and weather providers sit behind interfaces and are injected into services. Provider responses are normalised before they reach business logic. API keys stay on the server.
@@ -105,9 +107,26 @@ pytest                # unit tests; any network access fails the test
 
 # Frontend
 cd frontend
+npm test              # Vitest + Testing Library; fetch is mocked
+npm run typecheck
 npm run lint
 npm run build         # type check + production build
 ```
+
+## Running in production
+
+The backend runs under Gunicorn with the settings in `backend/gunicorn.conf.py`:
+
+```bash
+cd backend
+gunicorn config.wsgi:application -c gunicorn.conf.py
+```
+
+- **Worker timeout.** It is 120 seconds. A long analysis takes 10–20 seconds, and a free instance that has been sleeping can need up to a minute to wake.
+- **Workers.** One worker with 4 threads, so the in-memory provider caches are shared and memory stays low.
+- **Frontend timeout.** The frontend waits up to 120 seconds for an analysis, matching the server.
+- **Waiting state.** While waiting, it shows a spinner and the real elapsed time, with no estimated progress. After 10 seconds it explains that the server may be waking up and that this can take up to a minute.
+- **Server log.** Each analysis logs one line with the time spent per stage (geocoding, routing, via attempts, weather, risk, ranking, serialization) and counts. The line never includes place names, URLs or keys.
 
 ## API
 

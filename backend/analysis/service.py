@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -92,6 +93,8 @@ class AnalysisStats:
     window_start: datetime
     window_end: datetime
     elapsed_seconds: float
+    # Seconds spent per stage: geocoding, routing, via, weather, risk, ranking.
+    timings: Mapping[str, float]
 
 
 @dataclass(frozen=True)
@@ -159,9 +162,11 @@ class AnalysisService:
     def analyze(self, request: AnalysisRequest) -> AnalysisResult:
         started = time.perf_counter()
         departure = request.departure_utc
+        timings: dict[str, float] = {}
 
-        origin = self.geocoder.geocode(request.origin)
-        destination = self.geocoder.geocode(request.destination)
+        mark = time.perf_counter()
+        origin, destination = self._geocode_both(request.origin, request.destination)
+        timings["geocoding"] = time.perf_counter() - mark
         if haversine_miles(origin.position, destination.position) <= SAME_PLACE_MAX_MILES:
             raise ValidationFailed(
                 "Origin and destination resolve to the same place.",
@@ -172,6 +177,8 @@ class AnalysisService:
             self.router, origin.position, destination.position, departure, request.load_weight_lb
         )
         routes = selection.routes
+        timings["routing"] = selection.primary_seconds
+        timings["via"] = selection.via_seconds
 
         placed = []
         for route in routes:
@@ -186,11 +193,14 @@ class AnalysisService:
         latest_eta = max(eta for route_placements in placed for _, eta in route_placements)
         window_start, window_end = weather_window(departure, latest_eta, forecast_horizon_end(self.now()))
         locations = budget.all_locations
+        mark = time.perf_counter()
         forecasts = self.weather.hourly_forecast(list(locations), window_start, window_end)
+        timings["weather"] = time.perf_counter() - mark
         tables: dict[LatLng, HourlyTable] = {
             location: _complete_hours(forecast.hours) for location, forecast in zip(locations, forecasts)
         }
 
+        mark = time.perf_counter()
         candidates = []
         for index, (route, route_placements) in enumerate(zip(routes, placed)):
             checkpoints = tuple(
@@ -201,6 +211,9 @@ class AnalysisService:
             summary = summarize_route(f"candidate-{index}", segments, route.distance_miles, route.duration_seconds)
             candidates.append((summary, route, checkpoints))
 
+        risk_seconds = time.perf_counter() - mark
+
+        mark = time.perf_counter()
         ranking = rank_routes([summary for summary, _, _ in candidates])
         by_candidate = {summary.route_id: (route, checkpoints) for summary, route, checkpoints in candidates}
         final_ids = {ranked.summary.route_id: f"route-{ranked.rank}" for ranked in ranking.routes}
@@ -222,7 +235,11 @@ class AnalysisService:
             deciding_criterion=ranking.recommendation.deciding_criterion,
         )
 
+        timings["ranking"] = time.perf_counter() - mark
+
+        mark = time.perf_counter()
         forecast = self._heatmap(departure, budget.corridor_locations, tables, request.load_weight_lb)
+        timings["risk"] = risk_seconds + (time.perf_counter() - mark)
 
         stats = AnalysisStats(
             provider_route_count=selection.provider_route_count,
@@ -235,8 +252,9 @@ class AnalysisService:
             window_start=window_start,
             window_end=window_end,
             elapsed_seconds=time.perf_counter() - started,
+            timings=timings,
         )
-        logger.info("Analysis complete: %s", stats)
+        logger.debug("Analysis complete: %s", stats)
         return AnalysisResult(
             origin=origin,
             destination=destination,
@@ -246,6 +264,16 @@ class AnalysisService:
             forecast=forecast,
             stats=stats,
         )
+
+    def _geocode_both(self, origin_query: str, destination_query: str) -> tuple[GeocodedPlace, GeocodedPlace]:
+        """Geocode both places concurrently: the same two requests, in less wall time.
+
+        Errors surface in the same order as sequential calls (origin first).
+        """
+        with ThreadPoolExecutor(max_workers=2, thread_name_prefix="geocode") as pool:
+            origin = pool.submit(self.geocoder.geocode, origin_query)
+            destination = pool.submit(self.geocoder.geocode, destination_query)
+            return origin.result(), destination.result()
 
     def _score_checkpoint(self, route, placement, eta, tables, load_weight_lb) -> CheckpointResult:
         weather = _match(eta, tables[round_location((placement.lat, placement.lng))])

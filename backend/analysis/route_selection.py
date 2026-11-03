@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import math
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -32,6 +33,8 @@ class RouteSelection:
     notice: str | None
     provider_route_count: int
     via_attempts: int
+    primary_seconds: float = 0.0
+    via_seconds: float = 0.0
 
     @property
     def used_fallback(self) -> bool:
@@ -101,12 +104,15 @@ def select_routes(
     load_weight_lb: float,
 ) -> RouteSelection:
     selector = _Selector()
+    started = time.perf_counter()
     candidates = list(
         routing.calculate_routes(origin, destination, departure_utc, load_weight_lb, PROVIDER_MAX_ALTERNATIVES)
     )
     provider_route_count = len(candidates)
     accepted = selector.dedupe_and_filter(candidates)
+    primary_seconds = time.perf_counter() - started
 
+    via_started = time.perf_counter()
     attempts = 0
     for via in via_points(origin, destination):
         if len(accepted) >= MAX_ROUTES:
@@ -139,6 +145,8 @@ def select_routes(
         candidates.extend(via_routes)
         accepted = selector.dedupe_and_filter(candidates)
 
+    via_seconds = time.perf_counter() - via_started if attempts else 0.0
+
     final = tuple(sorted(accepted, key=lambda r: r.duration_seconds)[:MAX_ROUTES])
     if not final:
         raise NoRouteFound()
@@ -147,4 +155,6 @@ def select_routes(
         notice=route_notice(len(final)),
         provider_route_count=provider_route_count,
         via_attempts=attempts,
+        primary_seconds=primary_seconds,
+        via_seconds=via_seconds,
     )
