@@ -23,8 +23,8 @@ import {
   routesBounds,
   type CheckpointProps,
 } from './mapData'
-import { byId, byRoute, heatColor, heatFilter, heatOpacity, riskColor } from './expressions'
-import { MAP_COLORS, MAP_STYLE_URL, WEATHER_ATTRIBUTION } from './mapStyle'
+import { HEAT_LEVELS, byId, byRoute, heatLayerId, heatLevelFilter, riskColor } from './expressions'
+import { HEAT_BLUR, HEAT_OPACITY, MAP_COLORS, MAP_STYLE_URL, WEATHER_ATTRIBUTION } from './mapStyle'
 
 // MapLibre 6 looks for its worker next to its own module file. Vite pre-bundles
 // and hashes that file, so point MapLibre at the worker asset Vite emits instead.
@@ -56,22 +56,26 @@ function addLayers(map: MapLibreMap, hour: number) {
   const add = (layer: Record<string, unknown>) => map.addLayer(layer as never)
   const lineLayout = { 'line-join': 'round', 'line-cap': 'round' }
 
-  // Corridor heatmap: soft circles whose radius grows with zoom so neighbouring
-  // points (25 miles apart, plus 10 miles to each side) merge into one band.
-  add({
-    id: 'corridor-heat',
-    type: 'circle',
-    source: 'corridor',
-    filter: heatFilter(hour),
-    paint: {
-      'circle-color': heatColor(hour),
-      'circle-opacity': heatOpacity(hour),
-      'circle-blur': 0.85,
-      // About a 20-mile radius at mid latitudes (pixels per mile double each zoom level),
-      // so points 25 miles apart along the route overlap into one continuous band.
-      'circle-radius': ['interpolate', ['exponential', 2], ['zoom'], 0, 0.52, 12, 2150],
-    },
-  })
+  // Corridor heatmap: one layer per risk level, stacked Low (bottom) to No Travel
+  // (top), so a higher risk is always drawn over nearby lower-risk circles. Each
+  // layer has a fixed colour; its filter selects the points at that level for the
+  // selected hour. Soft circles grow with zoom so neighbouring points (25 miles
+  // apart, plus 10 miles to each side) merge into one continuous band.
+  for (const level of HEAT_LEVELS) {
+    add({
+      id: heatLayerId(level),
+      type: 'circle',
+      source: 'corridor',
+      filter: heatLevelFilter(hour, level),
+      paint: {
+        'circle-color': MAP_COLORS.risk[level],
+        'circle-opacity': HEAT_OPACITY[level],
+        'circle-blur': HEAT_BLUR[level],
+        // About a 20-mile radius at mid latitudes (pixels per mile double each zoom level).
+        'circle-radius': ['interpolate', ['exponential', 2], ['zoom'], 0, 0.52, 12, 2150],
+      },
+    })
+  }
 
   // Other routes and their overlays: muted, underneath the selected route.
   add({ id: 'routes-other-casing', type: 'line', source: 'routes', layout: lineLayout,
@@ -329,13 +333,11 @@ export function RouteMap({
     map.setFilter('route-recommended', ['all', byId('==', recommendedRouteId ?? NONE), byId('!=', selectedId)] as never)
   }, [routes, selectedRouteId, recommendedRouteId, loaded])
 
-  // Slider hour change: one filter and two paint properties. The source is never rebuilt.
+  // Slider hour change: one filter per heat layer. No paint change, no source rebuild.
   useEffect(() => {
     const map = mapRef.current
     if (!map || !loaded) return
-    map.setFilter('corridor-heat', heatFilter(selectedHour) as never)
-    map.setPaintProperty('corridor-heat', 'circle-color', heatColor(selectedHour) as never)
-    map.setPaintProperty('corridor-heat', 'circle-opacity', heatOpacity(selectedHour) as never)
+    for (const level of HEAT_LEVELS) map.setFilter(heatLayerId(level), heatLevelFilter(selectedHour, level) as never)
   }, [selectedHour, loaded])
 
   // MapLibre's stylesheet makes its container position: relative, so the frame

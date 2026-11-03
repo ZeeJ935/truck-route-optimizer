@@ -1,7 +1,18 @@
 import type { AnalysisResponse, AnalyzeRequest, ApiErrorBody } from '../types/api'
 
-// Base URL of the Django API. Empty in local dev (Vite proxies /api).
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
+/**
+ * Base URL of the Django API, from VITE_API_BASE_URL (set at build time). Local
+ * development leaves it empty and the Vite dev server proxies /api. A production
+ * build without it would call the frontend's own host, so that is reported as a
+ * configuration error instead.
+ */
+export function apiBaseUrl(): string {
+  const configured = (import.meta.env.VITE_API_BASE_URL ?? '').trim().replace(/\/$/, '')
+  if (!configured && import.meta.env.PROD) {
+    throw new ApiError('config_error', 'The app is not configured with an API URL. Please contact the site owner.')
+  }
+  return configured
+}
 
 // A long analysis takes 10-20 s, and a sleeping free server can need up to a
 // minute to wake, so the client waits as long as the server's worker timeout.
@@ -51,7 +62,7 @@ export async function analyzeRoutes(
   signal?.addEventListener('abort', forwardAbort)
 
   try {
-    const response = await fetch(`${API_BASE_URL}/api/routes/analyze`, {
+    const response = await fetch(`${apiBaseUrl()}/api/routes/analyze`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify(request),

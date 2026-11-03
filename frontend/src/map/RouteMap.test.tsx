@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { makeCheckpoint, makeResponse, makeRoute } from '../test/fixtures'
 import { Map as FakeMap } from '../test/maplibreFake'
 import type { CorridorPoint, RouteResult } from '../types/api'
+import { MAP_COLORS } from './mapStyle'
 import { RouteMap } from './RouteMap'
 
 const routes: RouteResult[] = [
@@ -56,11 +57,15 @@ async function renderMap(overrides: Partial<Parameters<typeof RouteMap>[0]> = {}
 const featureCount = (map: FakeMap, source: string) => (map.sources[source].data as { features: unknown[] }).features.length
 
 describe('RouteMap layers', () => {
-  it('stacks the heatmap at the bottom and the selected route above every other route', async () => {
+  it('stacks the heatmap layers at the bottom and the selected route above every other route', async () => {
     const { map } = await renderMap()
     expect(map.addSourceCalls).toEqual(['corridor', 'routes', 'hazards', 'checkpoints'])
     expect(map.layers.map((layer) => layer.id)).toEqual([
-      'corridor-heat',
+      'corridor-heat-0',
+      'corridor-heat-1',
+      'corridor-heat-2',
+      'corridor-heat-3',
+      'corridor-heat-4',
       'routes-other-casing',
       'routes-other',
       'hazard-other',
@@ -154,22 +159,39 @@ describe('route summaries on the map', () => {
   })
 })
 
-describe('heatmap layer', () => {
-  it('starts on the selected hour, drawing only hours with data', async () => {
-    const { map } = await renderMap({ selectedHour: 0 })
-    expect(map.filters['corridor-heat']).toEqual(['has', 'h0'])
+describe('heatmap layers', () => {
+  const heatLayers = ['corridor-heat-0', 'corridor-heat-1', 'corridor-heat-2', 'corridor-heat-3', 'corridor-heat-4']
+
+  it('stacks one fixed-colour layer per level, Low at the bottom and No Travel on top', async () => {
+    const { map } = await renderMap()
+    const ids = map.layers.map((layer) => layer.id)
+    expect(ids.slice(0, 5)).toEqual(heatLayers)
+    const colors = map.layers.slice(0, 5).map((layer) => layer.paint?.['circle-color'])
+    expect(colors).toEqual([
+      MAP_COLORS.risk[0],
+      MAP_COLORS.risk[1],
+      MAP_COLORS.risk[2],
+      MAP_COLORS.risk[3],
+      MAP_COLORS.risk[4],
+    ])
   })
 
-  it('changes hour by updating filter and paint only, never the source', async () => {
+  it('starts on the selected hour, each layer matching only its level (null matches none)', async () => {
+    const { map } = await renderMap({ selectedHour: 0 })
+    heatLayers.forEach((id, level) => expect(map.filters[id]).toEqual(['==', ['get', 'h0'], level]))
+  })
+
+  it('changes hour with one filter per layer: no paint change, no source rebuild, no request', async () => {
     const { map, rerender } = await renderMap()
     const corridorWrites = map.sources.corridor.setDataCalls
     const filterCalls = map.setFilterCalls
+    const paintCalls = map.setPaintCalls.length
     for (let hour = 1; hour <= 48; hour++) rerender({ selectedHour: hour })
-    await waitFor(() => expect(map.filters['corridor-heat']).toEqual(['has', 'h48']))
-    expect(map.paint['corridor-heat']['circle-color']).toEqual(expect.arrayContaining([['get', 'h48']]))
-    expect(map.paint['corridor-heat']['circle-opacity']).toEqual(expect.arrayContaining([['get', 'h48']]))
+    await waitFor(() => expect(map.filters['corridor-heat-4']).toEqual(['==', ['get', 'h48'], 4]))
+    heatLayers.forEach((id, level) => expect(map.filters[id]).toEqual(['==', ['get', 'h48'], level]))
+    expect(map.setFilterCalls - filterCalls).toBe(48 * 5)
+    expect(map.setPaintCalls.length).toBe(paintCalls)
     expect(map.sources.corridor.setDataCalls).toBe(corridorWrites)
-    expect(map.setFilterCalls - filterCalls).toBe(48)
     expect(fetchMock).not.toHaveBeenCalled()
   })
 })

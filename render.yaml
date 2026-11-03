@@ -1,0 +1,29 @@
+# Render Blueprint for the backend API (free web service).
+# Values marked sync: false are entered in the Render dashboard; none are committed.
+services:
+  - type: web
+    name: weather-truck-routing-api
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn config.wsgi:application -c gunicorn.conf.py
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.14"
+      - key: DJANGO_DEBUG
+        value: "false"
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: LOG_LEVEL
+        value: INFO
+      - key: TOMTOM_API_KEY
+        sync: false
+      # The Vercel site origin, e.g. https://your-app.vercel.app (no trailing slash).
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      # Optional extra host names; the Render host name is added automatically.
+      - key: ALLOWED_HOSTS
+        sync: false

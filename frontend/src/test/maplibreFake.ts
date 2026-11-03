@@ -25,7 +25,7 @@ export class Map {
   handlers: Record<string, Handler[]> = {}
   sources: Record<string, FakeSource> = {}
   addSourceCalls: string[] = []
-  layers: { id: string; filter?: unknown }[] = []
+  layers: { id: string; filter?: unknown; paint?: Record<string, unknown> }[] = []
   filters: Record<string, unknown> = {}
   setFilterCalls = 0
   paint: Record<string, Record<string, unknown>> = {}
@@ -63,7 +63,7 @@ export class Map {
     return this.sources[id]
   }
 
-  addLayer(layer: { id: string; filter?: unknown }) {
+  addLayer(layer: { id: string; filter?: unknown; paint?: Record<string, unknown> }) {
     this.layers.push(layer)
     if (layer.filter) this.filters[layer.id] = layer.filter
     return this

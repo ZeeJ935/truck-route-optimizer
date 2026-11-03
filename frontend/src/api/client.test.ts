@@ -78,3 +78,26 @@ describe('analyzeRoutes', () => {
     expect(await pending).toMatchObject({ code: 'client_timeout' })
   })
 })
+
+describe('API base URL', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it('uses VITE_API_BASE_URL without a trailing slash', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', 'https://api.example.com/')
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(makeResponse()))
+    vi.stubGlobal('fetch', fetchMock)
+    await analyzeRoutes(REQUEST)
+    expect(fetchMock.mock.calls[0][0]).toBe('https://api.example.com/api/routes/analyze')
+  })
+
+  it('reports a configuration error in a production build without an API URL', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', '')
+    vi.stubEnv('PROD', true)
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(analyzeRoutes(REQUEST)).rejects.toMatchObject({ code: 'config_error' })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+})

@@ -325,7 +325,7 @@ describe('forecast slider', () => {
       fireEvent.change(slider, { target: { value: String(hour) } })
     }
     expect(slider).toHaveValue('48')
-    expect(map.filters['corridor-heat']).toEqual(['has', 'h48'])
+    expect(map.filters['corridor-heat-4']).toEqual(['==', ['get', 'h48'], 4])
     expect(map.sources.corridor.setDataCalls).toBe(corridorWrites)
     expect(fetchMock).toHaveBeenCalledTimes(1) // only the original analysis
   })

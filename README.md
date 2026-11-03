@@ -50,19 +50,23 @@ backend/
   routing/     provider interfaces, normalization, TomTom implementation
   weather/     provider interface, Open-Meteo implementation
   tests/       pytest suite (network blocked; fake providers live only here)
+  gunicorn.conf.py  production server settings
 frontend/
   src/
     api/         API client
     components/  UI components
-    features/    feature modules
-    map/         map logic
-    types/       shared types
-    utils/       helpers
+    features/    feature modules (analysis state, form validation, forecast hours)
+    map/         map, layers, legend
+    types/       shared API types
+    utils/       formatting and time helpers
+  e2e/         Playwright checks and the labelled test fixture (not bundled)
+render.yaml    Render Blueprint for the backend
+frontend/vercel.json  Vercel settings for the frontend
 ```
 
 ## Getting started
 
-Prerequisites: Python 3.13 or newer, and Node 20 or newer.
+Prerequisites: Python 3.14 or newer, and Node 20 or newer.
 
 1. Copy `.env.example` to `.env` in the repo root. Set `TOMTOM_API_KEY` and `DJANGO_DEBUG=true`.
 
@@ -87,47 +91,81 @@ Prerequisites: Python 3.13 or newer, and Node 20 or newer.
 
 ## Environment variables
 
-| Variable | Used by | Purpose |
-|---|---|---|
-| `TOMTOM_API_KEY` | backend | TomTom routing and geocoding key |
-| `DJANGO_SECRET_KEY` | backend | Required when `DJANGO_DEBUG` is not `true` |
-| `DJANGO_DEBUG` | backend | `true` for local development only |
-| `ALLOWED_HOSTS` | backend | Comma-separated host names |
-| `CORS_ALLOWED_ORIGINS` | backend | Comma-separated frontend origins |
-| `VITE_API_BASE_URL` | frontend | Backend base URL. Leave it empty locally |
+Backend variables go in `.env` in the repo root for local development (template: `.env.example`), and in the Render service settings in production. Frontend variables are set at build time (template: `frontend/.env.example`), and in the Vercel project settings in production.
 
-Never commit `.env`. See `.env.example` for a template.
+| Variable | Used by | Required | Purpose |
+|---|---|---|---|
+| `TOMTOM_API_KEY` | backend | yes | TomTom routing and geocoding key. Stays on the server |
+| `DJANGO_SECRET_KEY` | backend | in production | Required whenever `DJANGO_DEBUG` is not `true` |
+| `DJANGO_DEBUG` | backend | no | `true` for local development only. Defaults to `false` |
+| `ALLOWED_HOSTS` | backend | no | Comma-separated host names. Render's host name is added automatically from `RENDER_EXTERNAL_HOSTNAME` |
+| `CORS_ALLOWED_ORIGINS` | backend | in production | Comma-separated frontend origins, e.g. `https://your-app.vercel.app` (no trailing slash) |
+| `LOG_LEVEL` | backend | no | `DEBUG`, `INFO` (default), `WARNING` or `ERROR` |
+| `SECURE_SSL_REDIRECT` | backend | no | Redirects HTTP to HTTPS. Defaults to `true` when `DJANGO_DEBUG` is `false` |
+| `SECURE_HSTS_SECONDS` | backend | no | HSTS max-age. Defaults to 3600 |
+| `VITE_API_BASE_URL` | frontend | in production | Backend base URL, e.g. `https://your-api.onrender.com`. Leave empty locally, where Vite proxies `/api` |
+
+- Local hosts and origins (`localhost`, the Vite dev server) are allowed only when `DJANGO_DEBUG` is `true`. Production never falls back to them.
+- A production frontend build without `VITE_API_BASE_URL` shows a configuration error instead of calling its own host.
+- Never commit `.env`. `VITE_` values are visible in the browser, so never put secrets in them.
 
 ## Tests and checks
 
 ```bash
 # Backend
 cd backend
-pytest                # unit tests; any network access fails the test
+pytest                # unit and API tests with fake providers; any network access fails the test
+python manage.py check --deploy   # with production environment variables set
 
 # Frontend
 cd frontend
-npm test              # Vitest + Testing Library; fetch is mocked
-npm run test:e2e      # Playwright browser checks with a labelled FIXTURE response (no backend needed)
+npm test              # Vitest + Testing Library; fetch and MapLibre are replaced by test doubles
+npm run test:e2e      # Playwright browser checks against a labelled FIXTURE response (no backend needed)
 npm run typecheck
 npm run lint
 npm run build         # type check + production build
 ```
 
-## Running in production
+There are three kinds of results, and they are kept separate:
 
-The backend runs under Gunicorn with the settings in `backend/gunicorn.conf.py`:
+- **Fake-provider tests** (backend `pytest`). TomTom, Open-Meteo and the clock are replaced by test doubles that live only in `backend/tests/`. They prove the rules exactly, including boundaries, all routes being unsafe, rate limits and provider failures. Production wiring cannot reach the fakes.
+- **Fixture checks** (`npm run test:e2e` and a Vitest scenario). These replay `frontend/e2e/fixtures/FIXTURE-analysis-response.json`, which is synthetic and clearly labelled, to exercise the UI states in a real or test browser.
+- **Live checks.** Real TomTom and Open-Meteo data through the running app. These depend on the current weather, so a scenario such as "every route is unsafe" can't be forced live.
 
-```bash
-cd backend
-gunicorn config.wsgi:application -c gunicorn.conf.py
-```
+## Deployment
 
-- **Worker timeout.** It is 120 seconds. A long analysis takes 10–20 seconds, and a free instance that has been sleeping can need up to a minute to wake.
-- **Workers.** One worker with 4 threads, so the in-memory provider caches are shared and memory stays low.
-- **Frontend timeout.** The frontend waits up to 120 seconds for an analysis, matching the server.
-- **Waiting state.** While waiting, it shows a spinner and the real elapsed time, with no estimated progress. After 10 seconds it explains that the server may be waking up and that this can take up to a minute.
-- **Server log.** Each analysis logs one line with the time spent per stage (geocoding, routing, via attempts, weather, risk, ranking, serialization) and counts. The line never includes place names, URLs or keys.
+The backend runs on a Render free web service, and the frontend on Vercel's free Hobby plan. Neither needs a payment method. If either service asks for a card, stop: this project is designed to use free plans only.
+
+**Backend (Render)**
+1. Create a web service from the GitHub repository, either from `render.yaml` (a Blueprint) or manually with these settings:
+   - root directory `backend`
+   - runtime Python, instance type Free
+   - build command `pip install -r requirements.txt`
+   - start command `gunicorn config.wsgi:application -c gunicorn.conf.py`
+   - health check path `/api/health`
+2. Set the environment variables:
+   - `PYTHON_VERSION=3.14`
+   - `DJANGO_DEBUG=false`
+   - `DJANGO_SECRET_KEY` set to a long random value
+   - `TOMTOM_API_KEY`
+   - `CORS_ALLOWED_ORIGINS` set to the Vercel URL
+   - `ALLOWED_HOSTS` is optional; Render's host name is added automatically
+
+**Frontend (Vercel)**
+1. Import the same repository with root directory `frontend`. The framework is Vite; `frontend/vercel.json` sets the build command, the output directory, an SPA rewrite and cache headers.
+2. Set `VITE_API_BASE_URL` to the Render URL, then deploy.
+3. Put the final Vercel URL into the backend's `CORS_ALLOWED_ORIGINS` and redeploy the backend.
+
+**Gunicorn** (`backend/gunicorn.conf.py`)
+- One worker with 4 threads, so the in-memory provider caches are shared and memory stays low.
+- A 120-second worker timeout, because a long analysis takes 10–20 seconds and a sleeping free instance can need up to a minute to wake.
+- Binds to `$PORT`.
+
+**HTTPS** Render terminates TLS. Django trusts `X-Forwarded-Proto`, redirects HTTP to HTTPS (except the health check, which Render calls internally), and sends HSTS and `nosniff` headers.
+
+**Cold starts** The free Render service sleeps after 15 minutes idle. The browser waits up to 120 seconds, shows the real elapsed time, and after 10 seconds explains that the server may be waking up.
+
+**Server log** Each analysis logs one line with the time spent per stage (geocoding, routing, via attempts, weather, risk, ranking, serialization) and counts. The line never includes place names, URLs or keys.
 
 ## API
 
@@ -331,11 +369,12 @@ There are two time views, and both are labelled in the app:
 - It has 49 positions. Hour N is departure + N hours, and hour 0 is the departure. The label shows the date and time in the trip's UTC offset, for example "+12 h · Nov 4, 14:10 UTC+05:00".
 - It's a native range input, so it works with mouse, touch and keyboard: arrow keys step one hour, and Home and End jump to the first and last available hours.
 - Hours with no data (from the backend's `forecast.available_hours`) can't be selected. Moving onto one skips to the nearest available hour in the direction of movement. Those hours are hatched grey in the strip under the slider, and the backend's notice explains why.
-- Moving the slider makes no network request. Each move only updates one layer filter and two paint properties; the heatmap data is built once per analysis and never rebuilt.
+- Moving the slider makes no network request. Each move only updates the filters of the five heat layers; the heatmap data is built once per analysis and never rebuilt, and no paint property changes.
 
 **The heatmap**
 - **Colour comes only from the backend's risk value for the selected hour, never from point density.** Each corridor point is a soft blurred circle coloured by that value, so overlapping Low points stay Low.
-- **Missing data isn't drawn.** Corridor values are stored as one property per hour (`h0` … `h48`). An hour with no forecast has no property, and a `has` filter hides it, so missing data is never shown as Low. 0 is a valid Low value.
+- **The highest risk stays on top.** There is one map layer per risk level, stacked from Low at the bottom to No Travel at the top. Each layer has a fixed colour and shows only the points at its level for the selected hour. Severe and No Travel cells are therefore always drawn over nearby Low circles. They also have firmer edges and higher opacity than Low, so they stay visible next to the route line.
+- **Missing data isn't drawn.** Corridor values are stored as one property per hour (`h0` … `h48`). An hour with no forecast has no property, so it matches no layer and is never shown as Low. 0 is a valid Low value.
 - **Low is subtle.** Low is the most transparent level and the risk levels get more opaque as they rise, so the routes and basemap stay readable.
 - **Circle size scales with zoom** (about a 20-mile radius), so points 25 miles apart along the route merge into one continuous band.
 - **Data format.** MapLibre 6 was also checked in the browser with an array property and an `at` expression, which works. The flat per-hour format was kept because missing hours are simpler and unambiguous that way.
@@ -366,19 +405,42 @@ The fixture lives outside `src/`, so it never enters the production bundle.
 - **Weather lookup points.** Weather is looked up at coordinates rounded to 2 decimals, which moves a point by at most about 0.4 mile.
 - **Route labels.** Routes after the first are labelled "Alternative".
 
-## Data providers and limitations
+## Data providers
 
-- **TomTom.**
-  - The free tier has a monthly request quota per API. Geocoding results are cached for 1 hour and route responses for 10 minutes.
-  - TomTom may return fewer alternative routes than requested, so the via-point fallback can add up to 4 extra routing requests.
+- **TomTom Routing and Geocoding (free tier).**
+  - Truck mode with the load sent as `vehicleWeight`.
   - Travel times come from the route's `progress` entries (cumulative distance and time), which is the most detailed timing TomTom provides.
-  - A response section can report `travelMode: "other"` where truck restrictions could not be applied. This is logged on the server.
-  - TomTom engine errors `NO_ROUTE_FOUND` and `MAP_MATCHING_FAILURE` are reported as `no_route_found`.
-- **Open-Meteo.**
-  - Free for non-commercial use, at 600 calls per minute, 5,000 per hour, and 10,000 per day per IP. Each location in a request counts as one call.
-  - Coordinates are rounded to 2 decimals (about 0.7 mile) and deduplicated. Requests carry up to 100 locations each, and results are cached for 15 minutes.
-  - Forecasts reach 16 days ahead.
-  - A missing forecast value stays missing; it is never treated as 0.
-  - The data is licensed under CC BY 4.0, which requires attribution.
-- **Map tiles.** OpenFreeMap and OpenStreetMap contributors (attribution shown on the map).
-- **Hosting.** The free Render service sleeps after 15 minutes idle, so the first request after that can take up to a minute.
+  - Geocoding results are cached for 1 hour and route responses for 10 minutes.
+  - A section reported as `travelMode: "other"` (truck restrictions not applied) is logged on the server.
+  - The engine errors `NO_ROUTE_FOUND` and `MAP_MATCHING_FAILURE` are reported as `no_route_found`.
+- **Open-Meteo forecast API (free, non-commercial).**
+  - Hourly wind, rain, showers and snowfall in mph and inches, in UTC, up to 16 days ahead.
+  - Coordinates are rounded to 2 decimals and deduplicated, sent in batches of up to 100, and cached for 15 minutes.
+  - A missing value stays missing; it is never treated as 0.
+  - The data is licensed under CC BY 4.0, and attribution is shown on the map.
+- **Map tiles.** OpenFreeMap with OpenMapTiles and OpenStreetMap data (attribution shown on the map).
+
+## Known limitations
+
+- **Free hosting cold start.** The Render free service sleeps after 15 minutes idle, so the first request afterwards can take up to a minute.
+- **Weather rate limits.** Open-Meteo's free limit is 600 calls per minute per IP, and each location counts as one call. Render's outbound IPs can be shared with other services. Two long analyses in a row may wait about 30 seconds for one retry, or fail with `provider_rate_limited`. The free API is for non-commercial use only.
+- **Routing quota and alternatives.**
+  - TomTom's free tier has a monthly request quota.
+  - TomTom often returns fewer than 3 alternatives. The via-point fallback is a heuristic and may still find fewer than 3 distinct routes within 1.5 times the fastest time; the app then says so.
+- **Very long trips.**
+  - At a 10-mile interval, more than 450 distinct checkpoint locations exceed the weather budget, and the app asks for a larger interval.
+  - A checkpoint ETA beyond the 16-day forecast horizon fails with `forecast_unavailable`.
+- **ETA model.**
+  - ETAs assume continuous driving at TomTom's travel times, with no rest breaks, fuel stops or hours-of-service rules.
+  - Traffic is TomTom's prediction for the departure time.
+- **Weather model.**
+  - Forecasts are hourly model data at roughly 1–2 km resolution, looked up at points rounded to about 0.4 mile.
+  - Precipitation is the total for the preceding hour, used as the hourly rate.
+  - Wind is the sustained 10 m wind, not gusts.
+- **Truck profile.** Only the load weight is sent, as a lower bound on gross vehicle weight. Truck dimensions, axle weights and hazardous materials are not modelled.
+- **Geocoding.** The top geocoding result is used. An ambiguous name may resolve to an unexpected place, which the app shows in the results.
+- **Heatmap coverage.** The corridor is sampled every 25 miles, with points 10 miles to each side, and is capped at 250 points. It shows weather along the routes, not the whole region.
+- **Time display.** All trip times use the departure's UTC offset, even when the route crosses time zones; the offset is always labelled.
+- **Caches.** Caches are in memory per server process, so they are lost on restart or when the free instance sleeps.
+- **Python version.** The code is tested locally on Python 3.15 and deployed on 3.14.
+- **Performance figures.** Frame timings in this project were measured in headless Chromium, so they are relative indicators, not real-device frame rates.

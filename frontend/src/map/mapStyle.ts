@@ -34,8 +34,17 @@ export const MAP_COLORS: {
 export const HEAT_OPACITY: Record<RiskLevel, number> = {
   0: 0.16,
   1: 0.3,
-  2: 0.42,
-  3: 0.5,
+  2: 0.45,
+  3: 0.62,
+  4: 0.7,
+}
+
+// Softer edges for low risk; firmer, more visible cores for High and above.
+export const HEAT_BLUR: Record<RiskLevel, number> = {
+  0: 0.85,
+  1: 0.85,
+  2: 0.7,
+  3: 0.55,
   4: 0.55,
 }
 

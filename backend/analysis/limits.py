@@ -55,7 +55,6 @@ DUPLICATE_MIN_SHARED_FRACTION = 0.9
 # Via-point fallback: perpendicular offsets from the midpoint of the straight
 # origin-destination line, as fractions of that line's length, tried in order.
 VIA_OFFSET_FRACTIONS: tuple[float, ...] = (0.15, -0.15, 0.30, -0.30)
-MAX_VIA_ATTEMPTS = len(VIA_OFFSET_FRACTIONS)
 
 # --- Providers -------------------------------------------------------------------
 

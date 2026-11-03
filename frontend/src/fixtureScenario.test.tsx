@@ -73,6 +73,6 @@ describe('FIXTURE scenario: every route has No Travel miles, partial forecast ho
     expect(screen.getByText(fixture.forecast.notice)).toBeInTheDocument()
     fireEvent.change(slider, { target: { value: '44' } })
     expect(slider).toHaveValue('35')
-    expect(map.filters['corridor-heat']).toEqual(['has', 'h35'])
+    expect(map.filters['corridor-heat-0']).toEqual(['==', ['get', 'h35'], 0])
   })
 })
