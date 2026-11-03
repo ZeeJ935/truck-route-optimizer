@@ -236,7 +236,9 @@ Never duplicate a route or alter geometry to make it look distinct. If fewer tha
 - The backend calculates all risk values. After analysis, moving the slider must make zero network requests.
 - Label the two time views clearly: checkpoints show weather at each ETA, while the heatmap shows the whole corridor at the selected time.
 
-Corridor default, documented as an assumption: sample each final route every 25 miles, with one center point and one point 10 miles to each side. Reduce density evenly if the set exceeds 600 points. Deduplicate shared points between routes.
+Corridor default, documented as an assumption: sample each final route every 25 miles, with one center point and one point 10 miles to each side. Reduce density evenly if the set exceeds 250 points (`CORRIDOR_MAX_POINTS` in `backend/analysis/limits.py`). Deduplicate shared points between routes.
+
+The 250-point cap replaces an earlier 600-point default. It comes from the measured Open-Meteo free limit. Each location in a request counts as one call, and the limit is 600 calls per minute per IP: a 7th 100-location request within one minute returned HTTP 429. A 600-point corridor plus checkpoints would not fit in one analysis.
 
 ## 1.13 Backend and frontend responsibilities
 

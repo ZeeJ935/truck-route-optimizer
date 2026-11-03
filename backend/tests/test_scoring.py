@@ -168,6 +168,21 @@ def test_earlier_value_beats_all_later_values():
     assert rank_routes([c, d]).routes[0].summary.route_id == "d"
 
 
+def test_ranking_uses_rounded_values_not_raw_miles():
+    # Raw Severe miles 8.01 and 8.04 both round to 8.0, so they tie and High miles decide.
+    # Ranking on raw values would pick the 8.01 route; ranking on rounded values picks
+    # the 8.04 route because it has fewer High miles.
+    raw_lower_severe = route("raw-8.01", [(8.01, S), (20, H), (71.99, L)])
+    raw_higher_severe = route("raw-8.04", [(8.04, S), (10, H), (81.96, L)])
+    assert raw_lower_severe.severe_miles == raw_higher_severe.severe_miles == 8.0
+
+    for order in ([raw_lower_severe, raw_higher_severe], [raw_higher_severe, raw_lower_severe]):
+        result = rank_routes(order)
+        assert result.routes[0].summary.route_id == "raw-8.04"
+        assert result.recommendation.deciding_criterion == RankingCriterion.HIGH_MILES
+        assert result.recommendation.reason == "Fewest High miles among the available routes."
+
+
 def test_travel_time_decides_only_when_everything_else_ties():
     slow_but_safer = summary("slow", high=1.0, duration=10_000)
     fast_but_riskier = summary("fast", high=1.1, duration=5_000)

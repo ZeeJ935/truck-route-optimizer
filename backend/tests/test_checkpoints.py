@@ -97,7 +97,7 @@ def _bent_polyline():
 def test_place_checkpoints_on_route_geometry(interval):
     polyline = _bent_polyline()
     total = cumulative_miles(polyline)[-1]
-    placements = place_checkpoints(polyline, interval)
+    placements = place_checkpoints(polyline, cumulative_miles(polyline), interval)
 
     assert [p.mile for p in placements] == checkpoint_miles(total, interval)
     assert (placements[0].lat, placements[0].lng) == polyline[0]
@@ -121,7 +121,7 @@ def test_place_checkpoints_on_route_geometry(interval):
 
 def test_place_checkpoints_mile_matches_distance_along_route():
     polyline = [(32.0 + i * 0.01, -97.0) for i in range(200)]
-    placements = place_checkpoints(polyline, 25)
+    placements = place_checkpoints(polyline, cumulative_miles(polyline), 25)
     origin = polyline[0]
     for placement in placements:
         # On a straight meridian, distance from origin equals the mile marker.

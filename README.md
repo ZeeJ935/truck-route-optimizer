@@ -42,11 +42,12 @@ The driver enters an origin, a destination, a departure time, and a load weight.
 backend/
   config/      Django settings and root URLs
   api/         HTTP endpoints
-  analysis/    checkpoints, ETAs, forecast matching, scoring, limits
+  analysis/    route selection, checkpoints, ETAs, forecast matching, scoring, limits
+  core/        stable service errors, HTTP helper, TTL cache, unit conversions
   risk/        risk levels, thresholds, RiskEngine
-  routing/     routing and geocoding providers
-  weather/     weather provider
-  tests/       pytest suite (network blocked)
+  routing/     provider interfaces, normalization, TomTom implementation
+  weather/     provider interface, Open-Meteo implementation
+  tests/       pytest suite (network blocked; fake providers live only here)
 frontend/
   src/
     api/         API client
@@ -138,6 +139,20 @@ Load rules adjust wind risk only:
 
 A checkpoint's risk is the worst of the three hazards. A reason is kept for every hazard above Low, for example "No Travel: wind 47 mph with load over 30,000 lb." Missing or invalid weather is rejected; it is never treated as Low.
 
+## Route selection
+
+1. Request up to 3 truck routes from TomTom: the fastest route plus 2 alternatives.
+2. Remove duplicates. Both routes are sampled every 0.25 mile, and they are duplicates if either has at least 90% of its samples within 0.5 mile of the other. The faster route of each duplicate pair is kept. Route IDs, distance and duration are never used to detect duplicates.
+3. Remove any route that takes more than 1.5 times as long as the fastest route.
+4. If fewer than 3 routes remain, request routes through via points. A via point is offset sideways from the midpoint of the straight origin-destination line, at 15% and then 30% of that line's length, on each side. Steps 2 and 3 are repeated after each via route. A via point that cannot be routed (for example, one in water) is skipped.
+5. If more than 3 routes remain, keep the 3 fastest.
+
+Routes are never copied or altered to look distinct. When fewer than 3 routes remain, the response says so, for example: "Only 2 distinct routes were available for this trip."
+
+## Distance basis
+
+Each route uses one distance basis: the provider's route length. The provider's geometry distances and travel-time progress distances are scaled so both end at exactly that length. Checkpoint miles, segment miles, ETAs and route totals therefore always agree, even though the length measured along the geometry differs slightly from the road length. In live checks the two differed by less than 0.2%.
+
 ## Checkpoints and ETAs
 
 - **Checkpoint placement.** Checkpoints sit on the route geometry: at mile 0, at every multiple of the sampling interval (10, 25, or 50 miles) below the route length, and at the destination.
@@ -185,12 +200,16 @@ Each route also gets a status:
 ## Data providers and limitations
 
 - **TomTom.**
-  - The free tier has a monthly request quota per API.
-  - TomTom may return fewer alternative routes than requested.
-  - A response section can report `travelMode: "other"` where truck restrictions could not be applied.
+  - The free tier has a monthly request quota per API. Geocoding results are cached for 1 hour and route responses for 10 minutes.
+  - TomTom may return fewer alternative routes than requested, so the via-point fallback can add up to 4 extra routing requests.
+  - Travel times come from the route's `progress` entries (cumulative distance and time), which is the most detailed timing TomTom provides.
+  - A response section can report `travelMode: "other"` where truck restrictions could not be applied. This is logged on the server.
+  - TomTom engine errors `NO_ROUTE_FOUND` and `MAP_MATCHING_FAILURE` are reported as `no_route_found`.
 - **Open-Meteo.**
   - Free for non-commercial use, at 600 calls per minute, 5,000 per hour, and 10,000 per day per IP. Each location in a request counts as one call.
+  - Coordinates are rounded to 2 decimals (about 0.7 mile) and deduplicated. Requests carry up to 100 locations each, and results are cached for 15 minutes.
   - Forecasts reach 16 days ahead.
+  - A missing forecast value stays missing; it is never treated as 0.
   - The data is licensed under CC BY 4.0, which requires attribution.
 - **Map tiles.** OpenFreeMap and OpenStreetMap contributors (attribution shown on the map).
 - **Hosting.** The free Render service sleeps after 15 minutes idle, so the first request after that can take up to a minute.

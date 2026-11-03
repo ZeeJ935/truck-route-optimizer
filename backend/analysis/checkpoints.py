@@ -11,7 +11,7 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from .geometry import LatLng, cumulative_miles, point_at_mile
+from .geometry import LatLng, point_at_mile
 from .limits import ALLOWED_SAMPLING_INTERVALS_MILES
 
 # A multiple of the interval this close to the route length is treated as the
@@ -67,9 +67,17 @@ def segment_miles(markers: Sequence[float]) -> list[float]:
     return segments
 
 
-def place_checkpoints(polyline: Sequence[LatLng], interval_miles: float) -> list[CheckpointPlacement]:
-    """Place checkpoints along the route geometry."""
-    cumulative = cumulative_miles(polyline)
+def place_checkpoints(
+    polyline: Sequence[LatLng], cumulative: Sequence[float], interval_miles: float
+) -> list[CheckpointPlacement]:
+    """Place checkpoints along the route geometry.
+
+    ``cumulative`` is the route's distance basis: one entry per vertex, ending at
+    the route length. Passing a normalized route's ``cumulative_miles`` makes
+    checkpoint miles match the provider's route length.
+    """
+    if len(polyline) != len(cumulative) or len(polyline) < 2:
+        raise ValueError("polyline and cumulative distances must have the same length (at least 2).")
     markers = checkpoint_miles(cumulative[-1], interval_miles)
     segments = segment_miles(markers)
 

@@ -35,3 +35,41 @@ CORRIDOR_MAX_POINTS = 250
 # by one analysis. It keeps one analysis inside Open-Meteo's 600 calls/minute
 # limit with a margin for retries and concurrent requests.
 MAX_WEATHER_LOCATIONS_PER_ANALYSIS = 550
+
+# --- Route selection -----------------------------------------------------------
+
+# Number of final routes compared, and the routing request for up to that many.
+MAX_ROUTES = 3
+PROVIDER_MAX_ALTERNATIVES = MAX_ROUTES - 1
+
+# Routes slower than this multiple of the fastest route's duration are removed.
+MAX_DURATION_RATIO = 1.5
+
+# Duplicate detection: both routes are sampled at the same spatial interval, and
+# they are duplicates if either has at least DUPLICATE_MIN_SHARED_FRACTION of its
+# samples within DUPLICATE_MAX_DISTANCE_MILES of the other.
+DUPLICATE_SAMPLE_INTERVAL_MILES = 0.25
+DUPLICATE_MAX_DISTANCE_MILES = 0.5
+DUPLICATE_MIN_SHARED_FRACTION = 0.9
+
+# Via-point fallback: perpendicular offsets from the midpoint of the straight
+# origin-destination line, as fractions of that line's length, tried in order.
+VIA_OFFSET_FRACTIONS: tuple[float, ...] = (0.15, -0.15, 0.30, -0.30)
+MAX_VIA_ATTEMPTS = len(VIA_OFFSET_FRACTIONS)
+
+# --- Providers -------------------------------------------------------------------
+
+PROVIDER_TIMEOUT_SECONDS = 20.0
+GEOCODE_CACHE_TTL_SECONDS = 60 * 60
+ROUTE_CACHE_TTL_SECONDS = 10 * 60
+WEATHER_CACHE_TTL_SECONDS = 15 * 60
+
+# Weather locations per Open-Meteo request (about a 2 KB URL at 100).
+WEATHER_BATCH_SIZE = 100
+
+# Coordinates are rounded to this many decimals (about 0.7 mile) before weather
+# lookup; identical rounded coordinates are requested once per analysis.
+WEATHER_COORD_DECIMALS = 2
+
+# Open-Meteo forecasts reach 16 days ahead.
+WEATHER_FORECAST_HORIZON_DAYS = 16
