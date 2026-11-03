@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { makeCheckpoint, makeRoute } from '../test/fixtures'
 import type { RiskLevel, RouteResult } from '../types/api'
 import {
+  allCheckpointFeatures,
   checkpointFeatures,
+  heatmapFeatures,
+  hourKey,
+  routeSummaryPopup,
   checkpointPopup,
   cumulativeMiles,
   hazardSections,
@@ -45,24 +49,29 @@ describe('representedRanges', () => {
 })
 
 describe('hazardSections', () => {
-  it('returns nothing when no checkpoint is Severe or No Travel', () => {
-    expect(hazardSections(routeWith([0, 1, 2, 0, 0], [0, 25, 50, 75, 100])).features).toEqual([])
+  it('returns nothing when every checkpoint is Low or Moderate', () => {
+    expect(hazardSections(routeWith([0, 1, 1, 0, 0], [0, 25, 50, 75, 100])).features).toEqual([])
+  })
+
+  it('marks High as well as Severe and No Travel sections', () => {
+    const sections = hazardSections(routeWith([0, 2, 1, 3, 4], [0, 25, 50, 75, 100])).features
+    expect(sections.map((feature) => feature.properties.level)).toEqual([2, 3, 4])
   })
 
   it('covers exactly the represented range of each hazardous checkpoint', () => {
     const route = routeWith([0, 3, 0, 4, 0], [0, 25, 50, 75, 100])
     const sections = hazardSections(route).features.map((feature) => feature.properties)
     expect(sections).toEqual([
-      { level: 3, fromMile: 12.5, toMile: 37.5 },
-      { level: 4, fromMile: 62.5, toMile: 87.5 },
+      { routeId: 'route-1', level: 3, fromMile: 12.5, toMile: 37.5 },
+      { routeId: 'route-1', level: 4, fromMile: 62.5, toMile: 87.5 },
     ])
   })
 
   it('includes the first and last checkpoints up to the route ends', () => {
     const sections = hazardSections(routeWith([4, 0, 0, 0, 3], [0, 25, 50, 75, 100])).features
     expect(sections.map((feature) => feature.properties)).toEqual([
-      { level: 4, fromMile: 0, toMile: 12.5 },
-      { level: 3, fromMile: 87.5, toMile: 100 },
+      { routeId: 'route-1', level: 4, fromMile: 0, toMile: 12.5 },
+      { routeId: 'route-1', level: 3, fromMile: 87.5, toMile: 100 },
     ])
     expect(sections[0].geometry.coordinates[0]).toEqual(NORTH[0])
     expect(sections[1].geometry.coordinates.at(-1)).toEqual(NORTH.at(-1))
@@ -71,8 +80,8 @@ describe('hazardSections', () => {
   it('merges neighbouring sections of the same level', () => {
     const sections = hazardSections(routeWith([0, 3, 3, 4, 0], [0, 25, 50, 75, 100])).features
     expect(sections.map((feature) => feature.properties)).toEqual([
-      { level: 3, fromMile: 12.5, toMile: 62.5 },
-      { level: 4, fromMile: 62.5, toMile: 87.5 },
+      { routeId: 'route-1', level: 3, fromMile: 12.5, toMile: 62.5 },
+      { routeId: 'route-1', level: 4, fromMile: 62.5, toMile: 87.5 },
     ])
   })
 
@@ -98,9 +107,14 @@ describe('features and bounds', () => {
   it('builds checkpoint points with the backend risk', () => {
     const route = routeWith([0, 4], [0, 50], 50)
     expect(checkpointFeatures(route).features.map((feature) => feature.properties)).toEqual([
-      { index: 0, risk: 0, mile: 0 },
-      { index: 1, risk: 4, mile: 50 },
+      { routeId: 'route-1', index: 0, risk: 0, mile: 0 },
+      { routeId: 'route-1', index: 1, risk: 4, mile: 50 },
     ])
+  })
+
+  it('builds checkpoints for every route, tagged with routeId', () => {
+    const features = allCheckpointFeatures([makeRoute(1), makeRoute(2)]).features
+    expect(features.map((feature) => feature.properties.routeId)).toEqual(['route-1', 'route-1', 'route-2', 'route-2'])
   })
 
   it('bounds every route', () => {
@@ -133,5 +147,45 @@ describe('checkpointPopup', () => {
       'Snow 0 in/hr',
     ])
     expect(popup.reasons).toEqual(['No Travel: wind 47 mph with load over 30,000 lb.'])
+  })
+})
+
+describe('routeSummaryPopup', () => {
+  it('shows the backend summary for a route', () => {
+    const route = makeRoute(2, {
+      label: 'Alternative',
+      status: 'NOT_SAFE',
+      distance_miles: 883.4,
+      duration_seconds: 43_872,
+      no_travel_miles: 0.1,
+      severe_miles: 8,
+      high_miles: 41,
+      average_risk: 0.74,
+    })
+    expect(routeSummaryPopup(route)).toEqual({
+      title: '#2 · Route 2',
+      label: 'Alternative',
+      status: 'Not Safe',
+      lines: ['883.4 mi · 12 h 11 min', 'No Travel 0.1 mi', 'Severe 8.0 mi', 'High 41.0 mi', 'Average risk 0.74'],
+    })
+  })
+})
+
+describe('heatmapFeatures', () => {
+  it('stores each hour as a flat property, keeping 0 and omitting null', () => {
+    const risk = Array.from({ length: 49 }, (_, hour) => (hour === 5 ? null : hour === 6 ? 0 : hour % 5)) as (
+      | 0
+      | 1
+      | 2
+      | 3
+      | 4
+      | null
+    )[]
+    const [feature] = heatmapFeatures([{ lat: 32.9, lng: -97.2, risk }]).features
+    expect(feature.geometry.coordinates).toEqual([-97.2, 32.9])
+    expect(hourKey(5) in feature.properties).toBe(false)
+    expect(feature.properties[hourKey(6)]).toBe(0)
+    expect(feature.properties[hourKey(4)]).toBe(4)
+    expect(Object.keys(feature.properties)).toHaveLength(48)
   })
 })

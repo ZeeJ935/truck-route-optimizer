@@ -1,6 +1,7 @@
 // Display helpers for the map. They reshape backend results into map features;
 // they make no risk, ranking, or status decisions.
-import type { Checkpoint, RiskLevel, RouteResult } from '../types/api'
+import type { Checkpoint, CorridorPoint, RiskLevel, RouteResult } from '../types/api'
+import { STATUS_DISPLAY, formatAverageRisk, formatDuration, formatMiles } from '../utils/format'
 import { formatTripTime } from '../utils/time'
 
 export type LngLat = [number, number]
@@ -29,19 +30,21 @@ export interface RouteProps {
 }
 
 export interface HazardProps {
+  routeId: string
   level: RiskLevel
   fromMile: number
   toMile: number
 }
 
 export interface CheckpointProps {
+  routeId: string
   index: number
   risk: RiskLevel
   mile: number
 }
 
-// Severe and No Travel sections are drawn over the selected route.
-export const HAZARD_MIN_RISK: RiskLevel = 3
+// High, Severe, and No Travel sections are drawn on the road.
+export const HAZARD_MIN_RISK: RiskLevel = 2
 
 const EARTH_RADIUS_MILES = 3958.7613
 
@@ -107,7 +110,7 @@ export function representedRanges(checkpoints: Checkpoint[], routeMiles: number)
   })
 }
 
-/** Severe and No Travel sections of a route, with neighbouring sections of the same level merged. */
+/** High, Severe, and No Travel sections of a route, with neighbouring sections of the same level merged. */
 export function hazardSections(route: RouteResult, cumulative?: number[]): FeatureCollection<LineFeature<HazardProps>> {
   const totals = cumulative ?? cumulativeMiles(route.geometry, route.distance_miles)
   const ranges = representedRanges(route.checkpoints, route.distance_miles)
@@ -117,7 +120,7 @@ export function hazardSections(route: RouteResult, cumulative?: number[]): Featu
     const [from, to] = ranges[i]
     const previous = merged[merged.length - 1]
     if (previous && previous.level === checkpoint.risk && previous.toMile === from) previous.toMile = to
-    else merged.push({ level: checkpoint.risk, fromMile: from, toMile: to })
+    else merged.push({ routeId: route.id, level: checkpoint.risk, fromMile: from, toMile: to })
   })
   return {
     type: 'FeatureCollection',
@@ -153,8 +156,70 @@ export function checkpointFeatures(route: RouteResult): FeatureCollection<PointF
     features: route.checkpoints.map((checkpoint, index) => ({
       type: 'Feature',
       geometry: { type: 'Point', coordinates: [checkpoint.lng, checkpoint.lat] },
-      properties: { index, risk: checkpoint.risk, mile: checkpoint.mile },
+      properties: { routeId: route.id, index, risk: checkpoint.risk, mile: checkpoint.mile },
     })),
+  }
+}
+
+/** Hazard sections of every route, tagged with routeId so layers can filter by selection. */
+export function allHazardSections(
+  routes: RouteResult[],
+  cumulativeById: Map<string, number[]>,
+): FeatureCollection<LineFeature<HazardProps>> {
+  return {
+    type: 'FeatureCollection',
+    features: routes.flatMap((route) => hazardSections(route, cumulativeById.get(route.id)).features),
+  }
+}
+
+/** Checkpoints of every route, tagged with routeId. */
+export function allCheckpointFeatures(routes: RouteResult[]): FeatureCollection<PointFeature<CheckpointProps>> {
+  return { type: 'FeatureCollection', features: routes.flatMap((route) => checkpointFeatures(route).features) }
+}
+
+export interface RouteSummaryPopup {
+  title: string
+  label: string
+  status: string
+  lines: string[]
+}
+
+/** A route's backend summary, formatted for a map popup. No values are recalculated. */
+export function routeSummaryPopup(route: RouteResult): RouteSummaryPopup {
+  return {
+    title: `#${route.rank} · Route ${route.rank}`,
+    label: route.label,
+    status: STATUS_DISPLAY[route.status].label,
+    lines: [
+      `${formatMiles(route.distance_miles)} · ${formatDuration(route.duration_seconds)}`,
+      `No Travel ${formatMiles(route.no_travel_miles)}`,
+      `Severe ${formatMiles(route.severe_miles)}`,
+      `High ${formatMiles(route.high_miles)}`,
+      `Average risk ${formatAverageRisk(route.average_risk)}`,
+    ],
+  }
+}
+
+/** Property name holding a corridor point's risk for slider hour N. */
+export function hourKey(hour: number): string {
+  return `h${hour}`
+}
+
+/**
+ * Corridor points with one flat property per hour (h0 ... h48) holding the
+ * backend's risk value. An hour without data (null) gets no property at all, so
+ * a ['has', key] filter hides it; 0 is kept as a valid Low value.
+ */
+export function heatmapFeatures(corridor: CorridorPoint[]): FeatureCollection<PointFeature<Record<string, number>>> {
+  return {
+    type: 'FeatureCollection',
+    features: corridor.map((point) => {
+      const properties: Record<string, number> = {}
+      point.risk.forEach((value, hour) => {
+        if (value !== null) properties[hourKey(hour)] = value
+      })
+      return { type: 'Feature', geometry: { type: 'Point', coordinates: [point.lng, point.lat] }, properties }
+    }),
   }
 }
 

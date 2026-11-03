@@ -29,6 +29,16 @@ export const MAP_COLORS: {
   },
 }
 
+// Heatmap opacity by backend risk value. Low stays subtle so routes and the basemap
+// remain readable; the colour itself always comes from the risk value, never density.
+export const HEAT_OPACITY: Record<RiskLevel, number> = {
+  0: 0.16,
+  1: 0.3,
+  2: 0.42,
+  3: 0.5,
+  4: 0.55,
+}
+
 export const RISK_LEGEND: { level: RiskLevel; label: string }[] = [
   { level: 0, label: 'Low' },
   { level: 1, label: 'Moderate' },

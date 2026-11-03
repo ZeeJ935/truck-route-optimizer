@@ -27,6 +27,10 @@ export class Map {
   addSourceCalls: string[] = []
   layers: { id: string; filter?: unknown }[] = []
   filters: Record<string, unknown> = {}
+  setFilterCalls = 0
+  paint: Record<string, Record<string, unknown>> = {}
+  setPaintCalls: string[] = []
+  popups: Popup[] = []
   fitBoundsCalls: unknown[][] = []
   removed = false
   canvas = { style: { cursor: '' } }
@@ -67,6 +71,13 @@ export class Map {
 
   setFilter(id: string, filter: unknown) {
     this.filters[id] = filter
+    this.setFilterCalls += 1
+    return this
+  }
+
+  setPaintProperty(id: string, property: string, value: unknown) {
+    ;(this.paint[id] ??= {})[property] = value
+    this.setPaintCalls.push(`${id}.${property}`)
     return this
   }
 
@@ -94,13 +105,26 @@ export class Map {
 
 export class Popup {
   removed = false
+  options: { closeButton?: boolean } = {}
+  text = ''
+
+  constructor(options: { closeButton?: boolean } = {}) {
+    this.options = options
+  }
+
+  get pinned() {
+    return Boolean(this.options.closeButton)
+  }
+
   setLngLat() {
     return this
   }
-  setDOMContent() {
+  setDOMContent(node: HTMLElement) {
+    this.text = node.textContent ?? ''
     return this
   }
-  addTo() {
+  addTo(map: Map) {
+    map.popups.push(this)
     return this
   }
   remove() {

@@ -108,6 +108,7 @@ pytest                # unit tests; any network access fails the test
 # Frontend
 cd frontend
 npm test              # Vitest + Testing Library; fetch is mocked
+npm run test:e2e      # Playwright browser checks with a labelled FIXTURE response (no backend needed)
 npm run typecheck
 npm run lint
 npm run build         # type check + production build
@@ -300,22 +301,57 @@ Each route also gets a status:
 The map uses MapLibre GL JS with OpenFreeMap's Positron basemap, which needs no key. It shows OpenFreeMap, OpenMapTiles and OpenStreetMap attribution, and "Weather: Open-Meteo.com (CC BY 4.0)".
 
 - **Routes.** Every route is drawn.
-  - The selected route is a thick blue line with a white casing, always drawn above the other routes. So on shared highways the selected route stays visible.
+  - The selected route is the strongest: a thick blue line with a white casing, always drawn above the other routes, so it stays visible on shared highways.
   - The top-ranked route, when not selected, is a dashed green line, labelled with its backend label ("Recommended", or "Best available, not safe").
   - The other routes are muted grey.
-- **Hazard sections.** Each Severe or No Travel checkpoint on the selected route colours the road it represents: from the midpoint with the previous checkpoint to the midpoint with the next one. Severe is red and No Travel is purple, with a dark outline. Neighbouring sections of the same level are merged.
-- **Checkpoints.** The selected route's checkpoints are dots coloured by risk. They are smaller at overview zoom, so the line stays visible at 10-mile spacing, and Severe or No Travel dots stay larger. Hovering a dot shows its ETA and forecast hour with the time-zone label, mile, wind, rain, snow, risk and reasons. Clicking pins the popup.
+- **Risk sections on the road.** Each High, Severe or No Travel checkpoint colours the road it represents: from the midpoint with the previous checkpoint to the midpoint with the next one, the same rule the backend uses for mileage. High is orange, Severe is red and No Travel is purple. Neighbouring sections of the same level are merged.
+  - Sections and checkpoints are drawn for **every** route.
+  - The selected route's are full strength, with a dark outline, and sit on top.
+  - Other routes' are thinner and semi-transparent, so the map stays readable.
+- **Checkpoints.** Dots coloured by risk. They're smaller at overview zoom, and High or worse stay larger. Hovering a dot shows its ETA and forecast hour with the time-zone label, mile, wind, rain, snow, risk and reasons. Clicking pins the popup.
+- **Route summaries.** Hovering any route line shows its rank, label, status, distance, travel time, No Travel, Severe and High miles, and average risk. Clicking a route selects it and pins its summary.
 - **Markers.** "A" marks the origin and "B" the destination.
-- **Legend.** It describes every colour in text. It is collapsible and starts collapsed on narrow screens.
-- **Selection.** Clicking a route on the map selects it in the panel, and selecting a card in the panel highlights the route on the map. Switching only changes map filters; it makes no network request and doesn't move the view.
-- **Fitting.** The view fits all routes after each analysis.
+- **Legend.** It describes every colour in text: routes, road sections, checkpoints, and the heatmap. It is collapsible and starts collapsed on narrow screens.
+- **Selection.** Clicking a route on the map selects it in the panel, and selecting a card in the panel highlights the route on the map. Switching only changes layer filters: no data is rebuilt, no request is made, and the view doesn't move.
+- **Fitting.** After each analysis, the view fits all routes, keeping them clear of the slider panel and the legend.
 - **Performance.** Measured on the largest response (Dallas to Denver at 10-mile sampling, about 32,000 route points), with no geometry simplification:
   - route switches took 36–54 ms
   - panning and zooming produced no main-thread long tasks
-  - no frame took longer than 8 ms
 
   The drawn lines therefore use the full route geometry.
 - **Loading.** MapLibre loads as a separate chunk after the form and results, and its web worker is served as its own asset.
+
+## Corridor heatmap and forecast slider
+
+There are two time views, and both are labelled in the app:
+- **Checkpoints** show the weather at each checkpoint's ETA.
+- **The heatmap** shows the whole trip corridor at the time selected on the slider.
+
+**The slider**
+- It has 49 positions. Hour N is departure + N hours, and hour 0 is the departure. The label shows the date and time in the trip's UTC offset, for example "+12 h · Nov 4, 14:10 UTC+05:00".
+- It's a native range input, so it works with mouse, touch and keyboard: arrow keys step one hour, and Home and End jump to the first and last available hours.
+- Hours with no data (from the backend's `forecast.available_hours`) can't be selected. Moving onto one skips to the nearest available hour in the direction of movement. Those hours are hatched grey in the strip under the slider, and the backend's notice explains why.
+- Moving the slider makes no network request. Each move only updates one layer filter and two paint properties; the heatmap data is built once per analysis and never rebuilt.
+
+**The heatmap**
+- **Colour comes only from the backend's risk value for the selected hour, never from point density.** Each corridor point is a soft blurred circle coloured by that value, so overlapping Low points stay Low.
+- **Missing data isn't drawn.** Corridor values are stored as one property per hour (`h0` … `h48`). An hour with no forecast has no property, and a `has` filter hides it, so missing data is never shown as Low. 0 is a valid Low value.
+- **Low is subtle.** Low is the most transparent level and the risk levels get more opaque as they rise, so the routes and basemap stay readable.
+- **Circle size scales with zoom** (about a 20-mile radius), so points 25 miles apart along the route merge into one continuous band.
+- **Data format.** MapLibre 6 was also checked in the browser with an array property and an `at` expression, which works. The flat per-hour format was kept because missing hours are simpler and unambiguous that way.
+
+## Test fixture
+
+`frontend/e2e/fixtures/FIXTURE-analysis-response.json` is synthetic, clearly labelled test data. It is not a real route, forecast or backend result. It covers:
+- High, Severe and No Travel checkpoints
+- every route having No Travel miles, so the global warning shows
+- forecast hours 36–48 missing
+
+Two checks use it, and their screenshots and results are fixture results, not live ones:
+- the Playwright checks in `frontend/e2e/`, which intercept the analyze request
+- a Vitest scenario test
+
+The fixture lives outside `src/`, so it never enters the production bundle.
 
 ## Assumptions
 

@@ -27,3 +27,8 @@ Thumbs.db
 
 # Local screenshots (kept out of git)
 docs/screenshots/
+
+# Playwright test output
+test-results/
+playwright-report/
+blob-report/

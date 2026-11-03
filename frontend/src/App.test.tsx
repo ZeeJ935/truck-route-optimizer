@@ -293,7 +293,11 @@ describe('map and panel selection stay in sync', () => {
     await showResults(makeResponse())
     const map = FakeMap.instances.at(-1)!
     await act(async () => {
-      map.emit('click', 'routes-hit', { point: { x: 0, y: 0 }, features: [{ properties: { id: 'route-3' } }] })
+      map.emit('click', 'routes-hit', {
+        point: { x: 0, y: 0 },
+        lngLat: { lng: -97, lat: 33 },
+        features: [{ properties: { id: 'route-3' } }],
+      })
     })
     expect(screen.getByRole('button', { name: 'Route 3, Alternative' })).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByRole('region', { name: 'Checkpoints for Route 3' })).toBeInTheDocument()
@@ -307,5 +311,28 @@ describe('map and panel selection stay in sync', () => {
     const map = FakeMap.instances.at(-1)!
     await user.click(screen.getByRole('button', { name: 'Route 2, Alternative' }))
     expect(map.filters['route-selected']).toEqual(['==', ['get', 'id'], 'route-2'])
+  })
+})
+
+describe('forecast slider', () => {
+  it('moving through all 49 hours makes zero network requests and updates only the map hour', async () => {
+    const { Map: FakeMap } = await import('./test/maplibreFake')
+    await showResults(makeResponse())
+    const map = FakeMap.instances.at(-1)!
+    const corridorWrites = map.sources.corridor.setDataCalls
+    const slider = screen.getByRole('slider', { name: 'Forecast hour after departure' })
+    for (let hour = 0; hour <= 48; hour++) {
+      fireEvent.change(slider, { target: { value: String(hour) } })
+    }
+    expect(slider).toHaveValue('48')
+    expect(map.filters['corridor-heat']).toEqual(['has', 'h48'])
+    expect(map.sources.corridor.setDataCalls).toBe(corridorWrites)
+    expect(fetchMock).toHaveBeenCalledTimes(1) // only the original analysis
+  })
+
+  it('starts at the first available hour of each new result', async () => {
+    const forecast = { ...makeResponse().forecast, available_hours: [3, 4, 5] }
+    await showResults(makeResponse({ forecast }))
+    expect(screen.getByRole('slider', { name: 'Forecast hour after departure' })).toHaveValue('3')
   })
 })
