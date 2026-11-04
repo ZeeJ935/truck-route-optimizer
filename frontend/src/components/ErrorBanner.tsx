@@ -5,6 +5,8 @@ const TITLES: Record<string, string> = {
   geocoding_failed: 'Location not found',
   no_route_found: 'No truck route found',
   forecast_unavailable: 'Forecast not available',
+  rate_limited: 'Too many requests',
+  daily_limit_reached: 'Daily limit reached',
   provider_rate_limited: 'Service busy',
   provider_timeout: 'Service timed out',
   provider_error: 'Service problem',

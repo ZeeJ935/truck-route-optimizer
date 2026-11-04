@@ -103,6 +103,7 @@ Backend variables go in `.env` in the repo root for local development (template:
 | `LOG_LEVEL` | backend | no | `DEBUG`, `INFO` (default), `WARNING` or `ERROR` |
 | `SECURE_SSL_REDIRECT` | backend | no | Redirects HTTP to HTTPS. Defaults to `true` when `DJANGO_DEBUG` is `false` |
 | `SECURE_HSTS_SECONDS` | backend | no | HSTS max-age. Defaults to 3600 |
+| `CLIENT_IP_HEADER` | backend | no | Name of a request header that your host or proxy sets to the real client IP and that clients cannot override. Per-client rate limits use only this header. Leave it empty when no such header exists; see [Rate limits](#rate-limits) |
 | `VITE_API_BASE_URL` | frontend | in production | Backend base URL, e.g. `https://your-api.onrender.com`. Leave empty locally, where Vite proxies `/api` |
 
 - Local hosts and origins (`localhost`, the Vite dev server) are allowed only when `DJANGO_DEBUG` is `true`. Production never falls back to them.
@@ -232,7 +233,7 @@ Response (abridged; all times are UTC, geometry is `[lng, lat]`):
 - Each corridor `risk` array lines up with `forecast.timestamps`. `null` means no forecast for that hour, and `0` means Low.
 - Responses are gzip-compressed when the client accepts it.
 
-Errors use one envelope: `{"error": {"code": "...", "message": "...", "fields": {...}}}`. `fields` appears only on validation errors.
+Errors use one envelope on every API endpoint, including unknown paths and wrong methods: `{"error": {"code": "...", "message": "...", "fields": {...}}}`. `fields` appears only on validation errors.
 
 | Code | HTTP | When |
 |---|---|---|
@@ -240,6 +241,11 @@ Errors use one envelope: `{"error": {"code": "...", "message": "...", "fields": 
 | `geocoding_failed` | 422 | A place could not be found |
 | `no_route_found` | 422 | No truck route exists between the places |
 | `forecast_unavailable` | 422 | A checkpoint ETA on a final route has no eligible forecast hour |
+| `not_found` | 404 | Unknown API path |
+| `method_not_allowed` | 405 | Wrong HTTP method, for example `GET` on analyze |
+| `request_too_large` | 413 | The request body is larger than 2.5 MB |
+| `rate_limited` | 429 | Too many requests from one client. Includes `Retry-After`. See [Rate limits](#rate-limits) |
+| `daily_limit_reached` | 503 | The app-wide daily weather cap is reached. Try again after midnight UTC |
 | `provider_rate_limited` | 503 | A provider rate-limited the request. Includes `Retry-After: 60` |
 | `provider_timeout` | 504 | A provider did not respond in time |
 | `provider_error` | 502 | A provider failed or returned an unexpected response |
@@ -255,11 +261,26 @@ Place suggestions for the Origin and Destination fields.
 - Errors use the same envelope:
   - `validation_error` (400): the text is too short or too long
   - `provider_rate_limited` (503), `provider_timeout` (504), `provider_error` (502): TomTom failed
-  - `rate_limited` (429): one client sent more than 60 requests a minute, which protects the free quota
+  - `rate_limited` (429): one client sent more than 60 requests a minute, which protects the free quota. The browser then simply shows no suggestions, and the user can keep typing the full address and run the analysis.
+
+### Rate limits
+
+Limits are checked before validation and before any TomTom or Open-Meteo call, so a refused request costs no provider quota.
+
+| Limit | Scope | Error |
+|---|---|---|
+| Analyze: 6 a minute and 60 a day | per client | `rate_limited` (429) with `Retry-After` |
+| Suggest: 60 a minute | per client | `rate_limited` (429) with `Retry-After` |
+| 8,000 uncached weather locations a UTC day | whole app | `daily_limit_reached` (503) |
+
+- **Client identity.** A client is identified only by the header named in `CLIENT_IP_HEADER`, which must be set by the host or proxy in a way clients cannot override. `X-Forwarded-For` is never used, because clients can add values to it. Local development (`DJANGO_DEBUG=true`) uses the socket address.
+- **No trusted header.** If `CLIENT_IP_HEADER` is empty in production, per-client limits are switched off and the global daily cap is the protection.
+- **Global weather cap.** Open-Meteo allows about 10,000 location calls a day per IP. Before any provider call, an analysis is refused if the worst case (550 locations) would pass 8,000 for the current UTC day. Only locations that are not already cached are counted, so a repeated trip within the cache time is free.
+- **Counters are in memory.** Rate-limit and cap counters live in the server process. They reset when the server restarts or the free instance sleeps, so the cap is a safety net, not exact accounting.
 
 ## Risk rules
 
-Each checkpoint's wind, rain, and snow are classified separately. Lower bounds are inclusive.
+Each checkpoint's wind, rain, and snow are classified separately. The ranges are read as half-open, with inclusive lower bounds (see [Assumptions](#assumptions)).
 
 | Level (value) | Wind (mph) | Rain (in/hr) | Snow (in/hr) |
 |---|---|---|---|
@@ -427,6 +448,8 @@ The fixture lives outside `src/`, so it never enters the production bundle.
 - **Same place.** An origin and destination that geocode within 0.5 mile of each other are treated as the same place.
 - **Weather lookup points.** Weather is looked up at coordinates rounded to 2 decimals, which moves a point by at most about 0.4 mile.
 - **Route labels.** Routes after the first are labelled "Alternative".
+- **Threshold boundaries.** The brief writes ranges as whole numbers (25–34 mph) or with shared edges (rain 0.10–0.25 and 0.25–0.50 in/hr). They are read as half-open ranges with an inclusive lower bound: 34.9 mph is Moderate and 35 mph is High. A value on a shared edge counts as the higher level, so 0.25 in/hr of rain is High and 0.50 in/hr is Severe; the same applies to snow at 1.0 and 2.0 in/hr. The top of Severe is inclusive (rain 1.00 and snow 3.0 are Severe), matching the brief's "> 1.00" and "> 3.0" for No Travel.
+- **Displayed segment miles.** Each checkpoint's `segment_miles` is rounded to 0.1 mile for display. Scoring uses the unrounded values, so the shown segments can add up to slightly more or less than the route length (two 16.05-mile segments show as 16.1 each on a 32.1-mile route).
 
 ## Data providers
 
@@ -462,7 +485,8 @@ The fixture lives outside `src/`, so it never enters the production bundle.
   - Precipitation is the total for the preceding hour, used as the hourly rate.
   - Wind is the sustained 10 m wind, not gusts.
 - **Truck profile.** Only the load weight is sent, as a lower bound on gross vehicle weight. Truck dimensions, axle weights and hazardous materials are not modelled.
-- **Address suggestions.** Suggestions cover the United States only (one constant to change). Each pause in typing that isn't already cached uses one of the 10,000 free monthly TomTom suggest requests. Requests are limited to 60 a minute per client.
+- **Address suggestions.** Suggestions cover the United States only (one constant to change). Each pause in typing that isn't already cached uses one of the 10,000 free monthly TomTom suggest requests. Requests are limited to 60 a minute per client when a trusted client-IP header is configured.
+- **Rate limits.** Per-client limits need a trusted client-IP header from the host (`CLIENT_IP_HEADER`). Without one, only the app-wide daily weather cap applies. All counters are in memory and reset when the server restarts.
 - **Geocoding.** The top geocoding result is used. An ambiguous name may resolve to an unexpected place, which the app shows in the results.
 - **Heatmap coverage.** The corridor is sampled every 25 miles, with points 10 miles to each side, and is capped at 250 points. It shows weather along the routes, not the whole region.
 - **Time display.** All trip times use the departure's UTC offset, even when the route crosses time zones; the offset is always labelled.

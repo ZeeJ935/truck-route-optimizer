@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Mapping
 from typing import Any, Protocol
+from urllib.parse import urlsplit
 
 import requests
 
@@ -30,31 +31,30 @@ class HttpPostSession(Protocol):
     ) -> Any: ...
 
 
-def _redact(text: str, secrets: tuple[str, ...]) -> str:
-    for secret in secrets:
-        if secret:
-            text = text.replace(secret, "***")
-    return text
+def _log_target(url: str) -> str:
+    """Only the provider host is logged. URL paths can hold user-entered places
+    (for example a geocoding query) and query strings can hold keys."""
+    return urlsplit(url).netloc or "provider"
 
 
 def _json_response(
     send: Callable[[], Any],
-    safe_url: str,
+    host: str,
     provider: str,
     error_mapper: ErrorMapper | None,
 ) -> Any:
     try:
         response = send()
     except requests.Timeout:
-        logger.warning("%s request timed out: %s", provider, safe_url)
+        logger.warning("%s request timed out: %s", provider, host)
         raise ProviderTimeout() from None
     except requests.RequestException as exc:
-        logger.warning("%s request failed: %s (%s)", provider, safe_url, type(exc).__name__)
+        logger.warning("%s request failed: %s (%s)", provider, host, type(exc).__name__)
         raise ProviderError() from None
 
     status = response.status_code
     if status == 429:
-        logger.warning("%s rate limited the request: %s", provider, safe_url)
+        logger.warning("%s rate limited the request: %s", provider, host)
         raise ProviderRateLimited()
 
     try:
@@ -66,13 +66,13 @@ def _json_response(
         if error_mapper is not None:
             mapped = error_mapper(status, body)
             if mapped is not None:
-                logger.info("%s returned HTTP %s mapped to %s: %s", provider, status, mapped.code, safe_url)
+                logger.info("%s returned HTTP %s mapped to %s: %s", provider, status, mapped.code, host)
                 raise mapped
-        logger.warning("%s returned HTTP %s: %s", provider, status, safe_url)
+        logger.warning("%s returned HTTP %s: %s", provider, status, host)
         raise ProviderError()
 
     if body is None:
-        logger.warning("%s returned a non-JSON body: %s", provider, safe_url)
+        logger.warning("%s returned a non-JSON body: %s", provider, host)
         raise ProviderError()
     return body
 
@@ -84,12 +84,11 @@ def get_json(
     *,
     timeout: float,
     provider: str,
-    secrets: tuple[str, ...] = (),
     error_mapper: ErrorMapper | None = None,
 ) -> Any:
     return _json_response(
         lambda: session.get(url, params=params, timeout=timeout),
-        _redact(url, secrets),
+        _log_target(url),
         provider,
         error_mapper,
     )
@@ -103,13 +102,12 @@ def post_json(
     headers: Mapping[str, str],
     timeout: float,
     provider: str,
-    secrets: tuple[str, ...] = (),
     error_mapper: ErrorMapper | None = None,
 ) -> Any:
-    """POST a JSON body. Secrets (for example a key sent in a header) never reach the logs."""
+    """POST a JSON body. Only the host is logged, so header keys never reach the logs."""
     return _json_response(
         lambda: session.post(url, json=body, headers=headers, timeout=timeout),
-        _redact(url, secrets),
+        _log_target(url),
         provider,
         error_mapper,
     )

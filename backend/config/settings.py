@@ -100,7 +100,14 @@ REST_FRAMEWORK = {
     "UNAUTHENTICATED_USER": None,
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
     "DEFAULT_PARSER_CLASSES": ["rest_framework.parsers.JSONParser"],
+    "EXCEPTION_HANDLER": "api.errors.drf_exception_handler",
 }
+
+# Header that the hosting edge sets (and overwrites) with the real client address,
+# used for per-client rate limits. X-Forwarded-For is never trusted. Leave empty
+# until the header is verified on the host: production then skips per-client
+# limits and relies on the global daily weather cap.
+CLIENT_IP_HEADER = os.environ.get("CLIENT_IP_HEADER", "").strip()
 
 # Provider credentials stay server-side only.
 TOMTOM_API_KEY = os.environ.get("TOMTOM_API_KEY", "")

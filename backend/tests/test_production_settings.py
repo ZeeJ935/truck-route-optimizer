@@ -10,6 +10,8 @@ BACKEND = Path(__file__).resolve().parents[1]
 
 PROBE = """
 import json
+import dotenv
+dotenv.load_dotenv = lambda *args, **kwargs: False  # ignore the developer's .env entirely
 from django.conf import settings
 import django
 django.setup()
@@ -28,8 +30,8 @@ print(json.dumps({
 
 
 def load_settings(env: dict[str, str]) -> subprocess.CompletedProcess:
-    # A clean environment: nothing from the developer's shell or .env leaks in
-    # (dotenv never overrides variables that are already set, and these are explicit).
+    # A clean environment: nothing from the developer's shell leaks in, and the probe
+    # switches off .env loading, so the result never depends on a local .env file.
     base = {key: os.environ[key] for key in ("PATH", "SYSTEMROOT", "TEMP", "TMP") if key in os.environ}
     full = {**base, "DJANGO_SETTINGS_MODULE": "config.settings", "TOMTOM_API_KEY": "", **env}
     return subprocess.run(

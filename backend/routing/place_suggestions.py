@@ -95,7 +95,6 @@ class TomTomPlaceSuggestionProvider:
             },
             timeout=self._timeout,
             provider=PROVIDER_NAME,
-            secrets=(self._api_key,),
         )
         results = body.get("results") if isinstance(body, dict) else None
         if not isinstance(results, list):

@@ -110,3 +110,14 @@ PLACE_SUGGEST_CACHE_TTL_SECONDS = 60 * 60
 PLACE_SUGGEST_TIMEOUT_SECONDS = 8.0
 # Per-client request limit for the public suggest endpoint, protecting the free quota.
 PLACE_SUGGEST_RATE = "60/min"
+
+# --- Abuse protection ---------------------------------------------------------------
+
+# Per-client analysis limits (checked before any provider call).
+ANALYZE_RATE_PER_MINUTE = "6/min"
+ANALYZE_RATE_PER_DAY = "60/day"
+
+# App-wide cap on uncached Open-Meteo locations per UTC day (free limit is 10,000).
+# An analysis is refused up front if the worst case (MAX_WEATHER_LOCATIONS_PER_ANALYSIS)
+# would pass it. Kept in memory: it resets when the server restarts.
+WEATHER_DAILY_LOCATION_CAP = 8_000

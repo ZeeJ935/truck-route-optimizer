@@ -1,4 +1,4 @@
-import { useId, useState, type KeyboardEvent } from 'react'
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
 import { usePlaceSuggestions } from '../features/places/usePlaceSuggestions'
 
 const TYPE_LABEL: Record<string, string> = {
@@ -21,6 +21,10 @@ interface PlaceInputProps {
  * A text field with optional place suggestions (WAI-ARIA combobox pattern).
  * Works with mouse, touch, and keyboard (arrows, Enter, Escape). The user can
  * always ignore the suggestions and type any address.
+ *
+ * The list never covers the rest of the form once it has nothing to add: it stays
+ * closed when the text already equals a suggestion, and it closes on submit, on
+ * Escape, on blur, and on a click or tap outside the field.
  */
 export function PlaceInput({ id, label, value, onChange, placeholder, ...aria }: PlaceInputProps) {
   const listId = useId()
@@ -28,13 +32,36 @@ export function PlaceInput({ id, label, value, onChange, placeholder, ...aria }:
   const [typing, setTyping] = useState(false)
   const [activeIndex, setActiveIndex] = useState(-1)
   const suggestions = usePlaceSuggestions(value, typing)
-  const open = typing && suggestions.length > 0
+  const wrapperRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const typed = value.trim().toLowerCase()
+  const alreadyChosen = suggestions.some((suggestion) => suggestion.label.toLowerCase() === typed)
+  const open = typing && suggestions.length > 0 && !alreadyChosen
   const optionId = (index: number) => `${listId}-option-${index}`
 
   const close = () => {
     setTyping(false)
     setActiveIndex(-1)
   }
+  // Close on a click or tap outside the field, and when the form is submitted.
+  useEffect(() => {
+    if (!open) return
+    const form = inputRef.current?.form
+    const closeList = () => {
+      setTyping(false)
+      setActiveIndex(-1)
+    }
+    const onPointerDown = (event: PointerEvent) => {
+      if (!wrapperRef.current?.contains(event.target as Node)) closeList()
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    form?.addEventListener('submit', closeList)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown)
+      form?.removeEventListener('submit', closeList)
+    }
+  }, [open])
+
   const choose = (index: number) => {
     onChange(suggestions[index].label)
     close()
@@ -51,6 +78,8 @@ export function PlaceInput({ id, label, value, onChange, placeholder, ...aria }:
     } else if (event.key === 'Enter' && activeIndex >= 0) {
       event.preventDefault() // choose the suggestion instead of submitting the form
       choose(activeIndex)
+    } else if (event.key === 'Enter') {
+      close() // no option chosen: let Enter submit the form with the typed text
     } else if (event.key === 'Escape') {
       event.preventDefault()
       close()
@@ -58,9 +87,10 @@ export function PlaceInput({ id, label, value, onChange, placeholder, ...aria }:
   }
 
   return (
-    <div className="place-input">
+    <div className="place-input" ref={wrapperRef}>
       <input
         {...aria}
+        ref={inputRef}
         id={id}
         type="text"
         role="combobox"

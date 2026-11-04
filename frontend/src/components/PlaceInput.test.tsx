@@ -152,3 +152,108 @@ describe('PlaceInput suggestions', () => {
     expect(screen.queryByRole('option')).not.toBeInTheDocument()
   })
 })
+
+function FormHarness({ onSubmit }: { onSubmit: (value: string) => void }) {
+  const [value, setValue] = useState('')
+  return (
+    <>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault()
+          onSubmit(value)
+        }}
+      >
+        <label htmlFor="destination">Destination</label>
+        <PlaceInput id="destination" label="Destination" value={value} onChange={setValue} />
+        <button type="submit">Find the safest route</button>
+      </form>
+      <p>Outside the form</p>
+    </>
+  )
+}
+
+const destination = () => screen.getByRole('combobox', { name: 'Destination' })
+
+describe('PlaceInput never blocks the form', () => {
+  it('does not open the list when the text already equals a suggestion, ignoring case', async () => {
+    mockedSuggest.mockResolvedValue([
+      { label: 'Denver, CO', type: 'area' },
+      { label: 'Denver, PA', type: 'area' },
+    ])
+    const user = userEvent.setup()
+    render(<FormHarness onSubmit={vi.fn()} />)
+    await user.type(destination(), 'denver, co ')
+    await waitFor(() => expect(mockedSuggest).toHaveBeenCalled())
+    await wait(SUGGEST_DEBOUNCE_MS + 100)
+    expect(destination()).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('option')).not.toBeInTheDocument()
+  })
+
+  it('closes an open list when typing reaches an exact suggestion', async () => {
+    mockedSuggest.mockResolvedValue([
+      { label: 'Denver, CO', type: 'area' },
+      { label: 'Denver, PA', type: 'area' },
+    ])
+    const user = userEvent.setup()
+    render(<FormHarness onSubmit={vi.fn()} />)
+    await user.type(destination(), 'Denver')
+    await screen.findByRole('listbox')
+    await user.type(destination(), ', CO')
+    await waitFor(() => expect(destination()).toHaveAttribute('aria-expanded', 'false'))
+  })
+
+  it('Enter with no option chosen closes the list and submits the typed text', async () => {
+    const onSubmit = vi.fn()
+    const user = userEvent.setup()
+    render(<FormHarness onSubmit={onSubmit} />)
+    await user.type(destination(), 'Dall')
+    await screen.findByRole('listbox')
+    await user.keyboard('{Enter}')
+    expect(onSubmit).toHaveBeenCalledWith('Dall')
+    expect(destination()).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('closes when the form is submitted', async () => {
+    const onSubmit = vi.fn()
+    const user = userEvent.setup()
+    render(<FormHarness onSubmit={onSubmit} />)
+    await user.type(destination(), 'Dall')
+    await screen.findByRole('listbox')
+    fireEvent.submit(destination().closest('form')!)
+    expect(onSubmit).toHaveBeenCalledWith('Dall')
+    expect(destination()).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('closes on a click or tap outside the field, but not inside the list', async () => {
+    const user = userEvent.setup()
+    render(<FormHarness onSubmit={vi.fn()} />)
+    await user.type(destination(), 'Dall')
+    const option = await screen.findByRole('option', { name: /Dallas, TX/ })
+    fireEvent.pointerDown(option)
+    expect(destination()).toHaveAttribute('aria-expanded', 'true')
+    fireEvent.pointerDown(screen.getByText('Outside the form'))
+    expect(destination()).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('closes on Escape', async () => {
+    const user = userEvent.setup()
+    render(<FormHarness onSubmit={vi.fn()} />)
+    await user.type(destination(), 'Dall')
+    await screen.findByRole('listbox')
+    await user.keyboard('{Escape}')
+    expect(destination()).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('a rate-limited suggestion request leaves typing and submitting working', async () => {
+    const { ApiError } = await import('../api/client')
+    mockedSuggest.mockRejectedValue(new ApiError('rate_limited', 'Too many suggestion requests.', 429))
+    const onSubmit = vi.fn()
+    const user = userEvent.setup()
+    render(<FormHarness onSubmit={onSubmit} />)
+    await user.type(destination(), '742 Evergreen Terrace, Springfield')
+    await waitFor(() => expect(mockedSuggest).toHaveBeenCalled())
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Find the safest route' }))
+    expect(onSubmit).toHaveBeenCalledWith('742 Evergreen Terrace, Springfield')
+  })
+})

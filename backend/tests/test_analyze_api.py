@@ -125,10 +125,6 @@ def test_malformed_json_is_a_validation_error(use_service, raw):
     assert response.json()["error"]["code"] == "validation_error"
 
 
-def test_wrong_method_is_rejected():
-    assert Client().get(URL).status_code == 405
-
-
 @pytest.mark.parametrize(
     ("service_kwargs", "status", "code"),
     [
@@ -182,7 +178,10 @@ def test_unexpected_error_returns_500_without_details(use_service, caplog):
     assert response.status_code == 500
     assert response.json()["error"]["code"] == "internal_error"
     assert "secret internal detail" not in response.content.decode()
-    assert "secret internal detail" in caplog.text  # logged on the server
+    # The server log keeps the type and location for debugging, never the message.
+    assert "Unexpected RuntimeError during route analysis" in caplog.text
+    assert "test_analyze_api.py" in caplog.text
+    assert "secret internal detail" not in caplog.text
 
 
 def test_fewer_routes_notice_is_in_the_response(use_service):
@@ -226,3 +225,26 @@ def test_timings_are_logged_without_place_names_or_keys(use_service, caplog, set
         assert stage in lines[0]
     assert "Origin" not in lines[0] and "Destination" not in lines[0]
     assert "never-log-this-key" not in caplog.text
+
+
+def test_oversized_body_is_a_413_in_the_standard_envelope(use_service, settings, caplog):
+    use_service(fake_service())
+    settings.DATA_UPLOAD_MAX_MEMORY_SIZE = 1_000
+    response = post(raw=json.dumps({**BODY, "origin": "x" * 5_000}))
+    assert response.status_code == 413
+    assert response.json() == {"error": {"code": "request_too_large", "message": "The request is too large."}}
+    assert "Traceback" not in caplog.text
+
+
+def test_get_on_analyze_is_a_json_405():
+    response = Client().get(URL)
+    assert response.status_code == 405
+    assert response.json()["error"]["code"] == "method_not_allowed"
+
+
+def test_unknown_api_path_is_a_json_404(settings):
+    settings.DEBUG = False
+    response = Client().get("/api/does-not-exist")
+    assert response.status_code == 404
+    assert response["Content-Type"].startswith("application/json")
+    assert response.json() == {"error": {"code": "not_found", "message": "This API endpoint does not exist."}}

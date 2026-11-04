@@ -51,3 +51,38 @@ class ProviderTimeout(ServiceError):
 
 class ProviderError(ServiceError):
     code = "provider_error"
+
+
+class RateLimited(ServiceError):
+    """This client sent too many requests (our own limit, not a provider's)."""
+
+    code = "rate_limited"
+    default_message = "Too many requests. Please wait a minute and try again."
+
+    def __init__(self, message: str | None = None, retry_after_seconds: int = 60):
+        super().__init__(message)
+        self.retry_after_seconds = max(1, int(retry_after_seconds))
+
+
+class DailyLimitReached(ServiceError):
+    """The app-wide daily budget of weather lookups is used up."""
+
+    code = "daily_limit_reached"
+    default_message = (
+        "This app has reached its daily weather data limit. Please try again after midnight UTC."
+    )
+
+
+class RequestTooLarge(ServiceError):
+    code = "request_too_large"
+    default_message = "The request is too large."
+
+
+class NotFound(ServiceError):
+    code = "not_found"
+    default_message = "This API endpoint does not exist."
+
+
+class MethodNotAllowed(ServiceError):
+    code = "method_not_allowed"
+    default_message = "This HTTP method is not allowed for this endpoint."

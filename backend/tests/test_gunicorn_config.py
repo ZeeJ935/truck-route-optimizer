@@ -24,3 +24,10 @@ def test_worker_timeout_allows_slow_analyses_and_cold_starts(monkeypatch):
 def test_binds_to_the_platform_port(monkeypatch):
     assert load_config(monkeypatch, "10000").bind == "0.0.0.0:10000"
     assert load_config(monkeypatch).bind == "0.0.0.0:8000"
+
+
+def test_access_log_leaves_out_queries_ips_and_browser_details(monkeypatch):
+    log_format = load_config(monkeypatch).access_log_format
+    for field in ("%(r)s", "%(q)s", "%(h)s", "%(a)s", "%(f)s", "%(u)s", "%({"):
+        assert field not in log_format
+    assert "%(U)s" in log_format and "%(s)s" in log_format  # path without the query, and status

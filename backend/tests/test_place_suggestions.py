@@ -183,16 +183,22 @@ def test_unexpected_failure_returns_500_without_details(use_suggestions):
     assert "secret detail" not in response.content.decode()
 
 
-def test_requests_per_client_are_rate_limited(use_suggestions):
-    use_suggestions(FakeSuggestions())
-    client = Client()
+def test_requests_per_client_are_rate_limited(use_suggestions, settings):
+    settings.CLIENT_IP_HEADER = "CF-Connecting-IP"
+    fake = use_suggestions(FakeSuggestions())
+    client = Client(HTTP_CF_CONNECTING_IP="198.51.100.20")
     statuses = [client.get(URL, {"q": f"Dallas {i}"}).status_code for i in range(61)]
     assert statuses[:60] == [200] * 60
     assert statuses[60] == 429
+    assert len(fake.queries) == 60  # the refused request never reached the provider
 
 
-def test_wrong_method_is_rejected():
-    assert Client().post(URL, {"q": "Dallas"}).status_code == 405
+def test_wrong_method_is_a_json_405():
+    response = Client().post(URL, {"q": "Dallas"})
+    assert response.status_code == 405
+    assert response.json() == {
+        "error": {"code": "method_not_allowed", "message": "This HTTP method is not allowed for this endpoint."}
+    }
 
 
 def test_production_wiring_uses_the_existing_key(settings):

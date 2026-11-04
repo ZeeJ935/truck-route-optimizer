@@ -16,10 +16,12 @@ from analysis.limits import (
     PLACE_SUGGEST_CACHE_TTL_SECONDS,
     ROUTE_CACHE_TTL_SECONDS,
     WEATHER_CACHE_TTL_SECONDS,
+    WEATHER_DAILY_LOCATION_CAP,
 )
 from analysis.service import AnalysisService
 from core.cache import TTLCache
 from core.errors import ProviderError
+from core.quota import DailyQuota
 from risk.engine import RiskEngine
 from routing.place_suggestions import TomTomPlaceSuggestionProvider
 from routing.tomtom import TomTomGeocodingProvider, TomTomRoutingProvider
@@ -33,6 +35,8 @@ _GEOCODE_CACHE = TTLCache(GEOCODE_CACHE_TTL_SECONDS, max_entries=512)
 _ROUTE_CACHE = TTLCache(ROUTE_CACHE_TTL_SECONDS, max_entries=128)
 _WEATHER_CACHE = TTLCache(WEATHER_CACHE_TTL_SECONDS, max_entries=20_000)
 _RISK_ENGINE = RiskEngine()
+# App-wide daily cap on uncached Open-Meteo locations (in memory: resets on restart).
+_WEATHER_QUOTA = DailyQuota(WEATHER_DAILY_LOCATION_CAP)
 
 
 def get_analysis_service() -> AnalysisService:
@@ -43,8 +47,9 @@ def get_analysis_service() -> AnalysisService:
     return AnalysisService(
         geocoder=TomTomGeocodingProvider(api_key, _SESSION, cache=_GEOCODE_CACHE),
         router=TomTomRoutingProvider(api_key, _SESSION, cache=_ROUTE_CACHE),
-        weather=OpenMeteoWeatherProvider(_SESSION, cache=_WEATHER_CACHE),
+        weather=OpenMeteoWeatherProvider(_SESSION, cache=_WEATHER_CACHE, quota=_WEATHER_QUOTA),
         engine=_RISK_ENGINE,
+        weather_quota=_WEATHER_QUOTA,
     )
 
 

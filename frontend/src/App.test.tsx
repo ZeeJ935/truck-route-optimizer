@@ -87,6 +87,21 @@ describe('form and errors', () => {
     expect(screen.queryByRole('region', { name: 'Recommendation' })).not.toBeInTheDocument()
   })
 
+  it.each([
+    ['rate_limited', 429, 'Too many requests', 'Too many analyses from this device. Please wait a minute and try again.'],
+    [
+      'daily_limit_reached',
+      503,
+      'Daily limit reached',
+      'This app has reached its daily weather data limit. Please try again after midnight UTC.',
+    ],
+  ])('shows a clear wait message for %s', async (code, status, title, message) => {
+    await submitTrip(jsonResponse({ error: { code, message } }, status))
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent(title)
+    expect(alert).toHaveTextContent(message)
+  })
+
   it('explains a network failure', async () => {
     await submitTrip(() => Promise.reject(new TypeError('Failed to fetch')))
     expect(await screen.findByRole('alert')).toHaveTextContent('Could not reach the server.')

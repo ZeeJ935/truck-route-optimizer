@@ -31,6 +31,7 @@ from analysis.limits import (
 from analysis.time_utils import require_aware
 from core.cache import TTLCache
 from core.errors import ProviderError, ProviderRateLimited
+from core.quota import DailyQuota
 from core.http import HttpSession, get_json
 
 from .types import HourlyWeather, LocationForecast
@@ -124,9 +125,11 @@ class OpenMeteoWeatherProvider:
         batch_size: int = WEATHER_BATCH_SIZE,
         sleep: Callable[[float], None] | None = None,
         clock: Callable[[], float] | None = None,
+        quota: DailyQuota | None = None,
     ):
         if batch_size <= 0:
             raise ValueError("batch_size must be positive.")
+        self._quota = quota
         self._session = session
         self._cache = cache
         self._timeout = timeout
@@ -168,6 +171,10 @@ class OpenMeteoWeatherProvider:
             else:
                 results[point] = cached
 
+        # Only uncached locations count toward the app-wide daily cap; a retry of the
+        # same batch is not counted twice.
+        if self._quota is not None:
+            self._quota.consume(len(missing))
         batches = [missing[offset : offset + self._batch_size] for offset in range(0, len(missing), self._batch_size)]
         pending = self._fetch_batches(batches, window, results)
         if pending:

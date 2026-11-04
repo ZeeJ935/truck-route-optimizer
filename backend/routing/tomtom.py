@@ -92,7 +92,6 @@ class TomTomGeocodingProvider:
             {"key": self._api_key, "limit": 1},
             timeout=self._timeout,
             provider=PROVIDER_NAME,
-            secrets=(self._api_key,),
         )
         results = body.get("results") if isinstance(body, dict) else None
         if not isinstance(results, list):
@@ -177,7 +176,6 @@ class TomTomRoutingProvider:
             {**params, "key": self._api_key},
             timeout=self._timeout,
             provider=PROVIDER_NAME,
-            secrets=(self._api_key,),
             error_mapper=_map_routing_error,
         )
         raw_routes = body.get("routes") if isinstance(body, dict) else None

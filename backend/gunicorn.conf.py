@@ -14,5 +14,8 @@ threads = 4
 timeout = 120
 graceful_timeout = 30
 accesslog = "-"
+# No query string, client IP, user agent or referrer: a query such as
+# /api/places/suggest?q=<typed address> must not reach the logs.
+access_log_format = '%(t)s "%(m)s %(U)s" %(s)s %(b)s %(L)s'
 errorlog = "-"
 loglevel = "info"

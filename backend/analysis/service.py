@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from core.errors import ForecastUnavailable, ValidationFailed
+from core.quota import DailyQuota
 from risk.engine import RiskAssessment, RiskEngine
 from routing.providers import GeocodingProvider, RoutingProvider
 from routing.types import GeocodedPlace, NormalizedRoute
@@ -35,7 +36,12 @@ from .eta import eta_at_mile
 from .forecast_matching import match_forecast_hour
 from .forecast_window import forecast_horizon_end, slider_timestamps, weather_window
 from .geometry import LatLng, haversine_miles, round_location
-from .limits import ANALYSIS_TIME_BUDGET_SECONDS, FORECAST_SLIDER_POSITIONS, SAME_PLACE_MAX_MILES
+from .limits import (
+    ANALYSIS_TIME_BUDGET_SECONDS,
+    FORECAST_SLIDER_POSITIONS,
+    MAX_WEATHER_LOCATIONS_PER_ANALYSIS,
+    SAME_PLACE_MAX_MILES,
+)
 from .request import AnalysisRequest
 from .route_selection import select_routes
 from .scoring import Recommendation, RiskSegment, RouteRiskSummary, rank_routes, summarize_route
@@ -152,14 +158,20 @@ class AnalysisService:
         weather: WeatherProvider,
         engine: RiskEngine,
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
+        weather_quota: DailyQuota | None = None,
     ):
         self.geocoder = geocoder
         self.router = router
         self.weather = weather
         self.engine = engine
         self.now = now
+        self.weather_quota = weather_quota
 
     def analyze(self, request: AnalysisRequest) -> AnalysisResult:
+        # Refuse up front, before any provider call, if the worst case for one
+        # analysis could pass the app-wide daily cap on uncached weather locations.
+        if self.weather_quota is not None:
+            self.weather_quota.ensure_available(MAX_WEATHER_LOCATIONS_PER_ANALYSIS)
         started = time.perf_counter()
         deadline = time.monotonic() + ANALYSIS_TIME_BUDGET_SECONDS
         departure = request.departure_utc
