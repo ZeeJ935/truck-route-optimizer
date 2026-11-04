@@ -40,47 +40,8 @@ def log_timings(stats, serialization_seconds: float) -> None:
     )
 
 
-def _log_client_ip_diagnostic(request: Request) -> None:
-    """TEMPORARY (remove after the hosting check): how the host passes the client address.
-
-    Logs only counts, positions, and short keyed hashes. It never logs an IP
-    address or any request content. 203.0.113.7 is a reserved documentation
-    address used as a marker to see whether client-supplied headers survive.
-    """
-    import hashlib
-    import hmac
-    import os
-
-    from django.conf import settings
-
-    secret = settings.SECRET_KEY.encode()
-
-    def tag(value: str | None) -> str:
-        if not value:
-            return "-"
-        return hmac.new(secret, value.strip().encode(), hashlib.sha256).hexdigest()[:8]
-
-    marker = "203.0.113.7"
-    forwarded = [part.strip() for part in request.headers.get("x-forwarded-for", "").split(",") if part.strip()]
-    logger.warning(
-        "TEMP-IPDIAG pid=%s xff_count=%d xff_tags=%s xff_marker_positions=%s remote=%s "
-        "cf_connecting_ip=%s cf_is_marker=%s true_client_ip=%s tci_is_marker=%s x_real_ip=%s",
-        os.getpid(),
-        len(forwarded),
-        [tag(part) for part in forwarded],
-        [index for index, part in enumerate(forwarded) if part == marker],
-        tag(request.META.get("REMOTE_ADDR")),
-        tag(request.headers.get("cf-connecting-ip")),
-        request.headers.get("cf-connecting-ip") == marker,
-        tag(request.headers.get("true-client-ip")),
-        request.headers.get("true-client-ip") == marker,
-        tag(request.headers.get("x-real-ip")),
-    )
-
-
 @api_view(["GET"])
 def health(request: Request) -> Response:
-    _log_client_ip_diagnostic(request)  # TEMPORARY: remove after the hosting check
     return Response({"status": "ok"})
 
 

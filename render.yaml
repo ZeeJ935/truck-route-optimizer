@@ -19,6 +19,10 @@ services:
         generateValue: true
       - key: LOG_LEVEL
         value: INFO
+      # Render's edge (Cloudflare) sets this to the real client IP and rejects
+      # client-supplied values, so per-client rate limits can trust it.
+      - key: CLIENT_IP_HEADER
+        value: CF-Connecting-IP
       - key: TOMTOM_API_KEY
         sync: false
       # The Vercel site origin, e.g. https://your-app.vercel.app (no trailing slash).

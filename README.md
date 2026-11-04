@@ -150,6 +150,7 @@ The backend runs on a Render free web service, and the frontend on Vercel's free
    - `DJANGO_SECRET_KEY` set to a long random value
    - `TOMTOM_API_KEY`
    - `CORS_ALLOWED_ORIGINS` set to the Vercel URL
+   - `CLIENT_IP_HEADER=CF-Connecting-IP`, for per-client rate limits
    - `ALLOWED_HOSTS` is optional; Render's host name is added automatically
 
 **Frontend (Vercel)**
@@ -274,6 +275,7 @@ Limits are checked before validation and before any TomTom or Open-Meteo call, s
 | 8,000 uncached weather locations a UTC day | whole app | `daily_limit_reached` (503) |
 
 - **Client identity.** A client is identified only by the header named in `CLIENT_IP_HEADER`, which must be set by the host or proxy in a way clients cannot override. `X-Forwarded-For` is never used, because clients can add values to it. Local development (`DJANGO_DEBUG=true`) uses the socket address.
+- **On Render**, set `CLIENT_IP_HEADER=CF-Connecting-IP`. Render's edge (Cloudflare) sets it to the real client IP, keeps it the same across requests, and rejects requests where the client supplies it.
 - **No trusted header.** If `CLIENT_IP_HEADER` is empty in production, per-client limits are switched off and the global daily cap is the protection.
 - **Global weather cap.** Open-Meteo allows about 10,000 location calls a day per IP. Before any provider call, an analysis is refused if the worst case (550 locations) would pass 8,000 for the current UTC day. Only locations that are not already cached are counted, so a repeated trip within the cache time is free.
 - **Counters are in memory.** Rate-limit and cap counters live in the server process. They reset when the server restarts or the free instance sleeps, so the cap is a safety net, not exact accounting.
