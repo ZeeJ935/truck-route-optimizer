@@ -144,7 +144,7 @@ The backend runs on a Render free web service, and the frontend on Vercel's free
    - start command `gunicorn config.wsgi:application -c gunicorn.conf.py`
    - health check path `/api/health`
 2. Set the environment variables:
-   - `PYTHON_VERSION=3.14`
+   - `PYTHON_VERSION=3.14.8`
    - `DJANGO_DEBUG=false`
    - `DJANGO_SECRET_KEY` set to a long random value
    - `TOMTOM_API_KEY`
@@ -442,5 +442,5 @@ The fixture lives outside `src/`, so it never enters the production bundle.
 - **Heatmap coverage.** The corridor is sampled every 25 miles, with points 10 miles to each side, and is capped at 250 points. It shows weather along the routes, not the whole region.
 - **Time display.** All trip times use the departure's UTC offset, even when the route crosses time zones; the offset is always labelled.
 - **Caches.** Caches are in memory per server process, so they are lost on restart or when the free instance sleeps.
-- **Python version.** The code is tested locally on Python 3.15 and deployed on 3.14.
+- **Python version.** The code is tested locally on Python 3.15 and deployed on Python 3.14.8.
 - **Performance figures.** Frame timings in this project were measured in headless Chromium, so they are relative indicators, not real-device frame rates.

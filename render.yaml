@@ -12,7 +12,7 @@ services:
     autoDeploy: true
     envVars:
       - key: PYTHON_VERSION
-        value: "3.14"
+        value: "3.14.8"
       - key: DJANGO_DEBUG
         value: "false"
       - key: DJANGO_SECRET_KEY
