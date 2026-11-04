@@ -38,3 +38,11 @@ class NormalizedRoute:
     # Travel mode of each TRAVEL_MODE section the provider reported ("truck", or
     # "other" where truck restrictions could not be applied). Internal only.
     travel_modes: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class PlaceSuggestion:
+    """A place to offer while the user types. Only text: the analysis geocodes it later."""
+
+    label: str
+    kind: str  # "address", "street", or "area" (cities, regions, postal areas)

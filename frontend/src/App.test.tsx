@@ -336,3 +336,19 @@ describe('forecast slider', () => {
     expect(screen.getByRole('slider', { name: 'Forecast hour after departure' })).toHaveValue('3')
   })
 })
+
+describe('place suggestions in the form', () => {
+  it('the analysis still runs when suggestions fail', async () => {
+    const { suggestPlaces } = await import('./api/places')
+    vi.mocked(suggestPlaces).mockRejectedValueOnce(new Error('suggestions down')).mockRejectedValue(new Error('down'))
+    fetchMock.mockResolvedValueOnce(jsonResponse(makeResponse()))
+    const user = userEvent.setup()
+    render(<App />)
+    await user.type(screen.getByLabelText('Origin'), 'Dallas, TX')
+    await user.type(screen.getByLabelText('Destination'), 'Denver, CO')
+    await act(() => new Promise((resolve) => setTimeout(resolve, 400)))
+    await user.click(screen.getByRole('button', { name: 'Find the safest route' }))
+    expect(await screen.findByRole('region', { name: 'Recommendation' })).toBeInTheDocument()
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ origin: 'Dallas, TX', destination: 'Denver, CO' })
+  })
+})

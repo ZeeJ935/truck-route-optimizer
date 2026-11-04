@@ -65,8 +65,8 @@ test('FIXTURE: Severe and No Travel heat cells stay visible among overlapping Lo
     route.fulfill({ status: 200, contentType: 'application/json', body: overlapFixture() }),
   )
   await page.goto('/')
-  await page.getByLabel('Origin').fill('FIXTURE origin')
-  await page.getByLabel('Destination').fill('FIXTURE destination')
+  await page.getByLabel('Origin', { exact: true }).fill('FIXTURE origin')
+  await page.getByLabel('Destination', { exact: true }).fill('FIXTURE destination')
   await page.getByRole('button', { name: 'Find the safest route' }).click()
   await expect(page.locator('.endpoint-marker')).toHaveCount(2, { timeout: 30_000 })
   // Close the legend so it does not cover the map, then let tiles and the fit settle.

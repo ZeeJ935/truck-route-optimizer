@@ -254,6 +254,16 @@ The backend alone calculates risk, risk mileage, average risk, route status, ran
 
 The frontend renders those results and selects the forecast hour. It must not contain thresholds, load rules, or ranking logic. Mapping a risk value to a color or label is allowed.
 
+## 1.14 User-requested addition: address suggestions
+
+This was added at the user's request after the original specification.
+
+- The Origin and Destination fields suggest places as the user types.
+- A backend endpoint, `GET /api/places/suggest?q=`, calls TomTom's Places Search Suggest API with the existing server-side `TOMTOM_API_KEY`. There is no second key, and no key is exposed to the frontend.
+- The frontend searches only after 3 or more characters, debounces requests by about 300 ms, cancels outdated requests, and caches repeat searches.
+- Selection works with mouse, touch and keyboard, with accessible labels.
+- Suggestions are optional: if they fail, the user can still type an address and run the analysis.
+
 ---
 
 # Part 2: Technical Decisions

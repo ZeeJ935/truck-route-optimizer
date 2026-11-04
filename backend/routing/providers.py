@@ -8,7 +8,7 @@ from typing import Protocol
 
 from analysis.geometry import LatLng
 
-from .types import GeocodedPlace, NormalizedRoute
+from .types import GeocodedPlace, NormalizedRoute, PlaceSuggestion
 
 
 class GeocodingProvider(Protocol):
@@ -25,3 +25,7 @@ class RoutingProvider(Protocol):
         max_alternatives: int,
         via: Sequence[LatLng] = (),
     ) -> list[NormalizedRoute]: ...
+
+
+class PlaceSuggestionProvider(Protocol):
+    def suggest(self, query: str) -> list[PlaceSuggestion]: ...

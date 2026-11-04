@@ -19,8 +19,8 @@ async function loadFixture(page: Page) {
     await route.fulfill({ status: 200, contentType: 'application/json', body: FIXTURE })
   })
   await page.goto('/')
-  await page.getByLabel('Origin').fill('FIXTURE origin')
-  await page.getByLabel('Destination').fill('FIXTURE destination')
+  await page.getByLabel('Origin', { exact: true }).fill('FIXTURE origin')
+  await page.getByLabel('Destination', { exact: true }).fill('FIXTURE destination')
   await page.getByRole('button', { name: 'Find the safest route' }).click()
   await expect(page.getByRole('region', { name: 'Recommendation' })).toBeVisible()
   // The A/B markers appear once the map has loaded the result; then let the fit animation and tiles settle.

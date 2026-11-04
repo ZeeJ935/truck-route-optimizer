@@ -1,4 +1,4 @@
-"""HTTP helper that maps transport and provider failures to stable error codes."""
+"""HTTP helpers that map transport and provider failures to stable error codes."""
 
 from __future__ import annotations
 
@@ -20,6 +20,16 @@ class HttpSession(Protocol):
     def get(self, url: str, params: Mapping[str, Any] | None = None, timeout: float | None = None) -> Any: ...
 
 
+class HttpPostSession(Protocol):
+    def post(
+        self,
+        url: str,
+        json: Any = None,
+        headers: Mapping[str, str] | None = None,
+        timeout: float | None = None,
+    ) -> Any: ...
+
+
 def _redact(text: str, secrets: tuple[str, ...]) -> str:
     for secret in secrets:
         if secret:
@@ -27,19 +37,14 @@ def _redact(text: str, secrets: tuple[str, ...]) -> str:
     return text
 
 
-def get_json(
-    session: HttpSession,
-    url: str,
-    params: Mapping[str, Any],
-    *,
-    timeout: float,
+def _json_response(
+    send: Callable[[], Any],
+    safe_url: str,
     provider: str,
-    secrets: tuple[str, ...] = (),
-    error_mapper: ErrorMapper | None = None,
+    error_mapper: ErrorMapper | None,
 ) -> Any:
-    safe_url = _redact(url, secrets)
     try:
-        response = session.get(url, params=params, timeout=timeout)
+        response = send()
     except requests.Timeout:
         logger.warning("%s request timed out: %s", provider, safe_url)
         raise ProviderTimeout() from None
@@ -70,3 +75,41 @@ def get_json(
         logger.warning("%s returned a non-JSON body: %s", provider, safe_url)
         raise ProviderError()
     return body
+
+
+def get_json(
+    session: HttpSession,
+    url: str,
+    params: Mapping[str, Any],
+    *,
+    timeout: float,
+    provider: str,
+    secrets: tuple[str, ...] = (),
+    error_mapper: ErrorMapper | None = None,
+) -> Any:
+    return _json_response(
+        lambda: session.get(url, params=params, timeout=timeout),
+        _redact(url, secrets),
+        provider,
+        error_mapper,
+    )
+
+
+def post_json(
+    session: HttpPostSession,
+    url: str,
+    body: Any,
+    *,
+    headers: Mapping[str, str],
+    timeout: float,
+    provider: str,
+    secrets: tuple[str, ...] = (),
+    error_mapper: ErrorMapper | None = None,
+) -> Any:
+    """POST a JSON body. Secrets (for example a key sent in a header) never reach the logs."""
+    return _json_response(
+        lambda: session.post(url, json=body, headers=headers, timeout=timeout),
+        _redact(url, secrets),
+        provider,
+        error_mapper,
+    )

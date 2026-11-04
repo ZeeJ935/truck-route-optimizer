@@ -11,11 +11,17 @@ import logging
 import requests
 from django.conf import settings
 
-from analysis.limits import GEOCODE_CACHE_TTL_SECONDS, ROUTE_CACHE_TTL_SECONDS, WEATHER_CACHE_TTL_SECONDS
+from analysis.limits import (
+    GEOCODE_CACHE_TTL_SECONDS,
+    PLACE_SUGGEST_CACHE_TTL_SECONDS,
+    ROUTE_CACHE_TTL_SECONDS,
+    WEATHER_CACHE_TTL_SECONDS,
+)
 from analysis.service import AnalysisService
 from core.cache import TTLCache
 from core.errors import ProviderError
 from risk.engine import RiskEngine
+from routing.place_suggestions import TomTomPlaceSuggestionProvider
 from routing.tomtom import TomTomGeocodingProvider, TomTomRoutingProvider
 from weather.open_meteo import OpenMeteoWeatherProvider
 
@@ -40,3 +46,15 @@ def get_analysis_service() -> AnalysisService:
         weather=OpenMeteoWeatherProvider(_SESSION, cache=_WEATHER_CACHE),
         engine=_RISK_ENGINE,
     )
+
+
+_SUGGEST_CACHE = TTLCache(PLACE_SUGGEST_CACHE_TTL_SECONDS, max_entries=2_000)
+
+
+def get_place_suggestion_provider() -> TomTomPlaceSuggestionProvider:
+    """Place suggestions use the same server-side TOMTOM_API_KEY; no second key."""
+    api_key = settings.TOMTOM_API_KEY
+    if not api_key:
+        logger.error("TOMTOM_API_KEY is not configured.")
+        raise ProviderError("The place search service is not configured.")
+    return TomTomPlaceSuggestionProvider(api_key, _SESSION, cache=_SUGGEST_CACHE)

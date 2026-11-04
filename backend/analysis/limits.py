@@ -96,3 +96,17 @@ ANALYSIS_TIME_BUDGET_SECONDS = 100
 WEATHER_RETRY_DELAY_SECONDS = 30
 # Time reserved for the retried requests themselves when checking the budget.
 WEATHER_RETRY_MARGIN_SECONDS = 15
+
+# --- Place suggestions (origin and destination typeahead) ------------------------
+
+# Searches start at this many characters; longer input is rejected.
+PLACE_SUGGEST_MIN_CHARS = 3
+PLACE_SUGGEST_MAX_CHARS = 100
+PLACE_SUGGEST_MAX_RESULTS = 5
+# Suggestions are limited to these countries (ISO 3166-1 alpha-2). The app is built
+# for US trucking (mph, inches, pounds); add codes here to widen it.
+PLACE_SUGGEST_COUNTRIES: tuple[str, ...] = ("US",)
+PLACE_SUGGEST_CACHE_TTL_SECONDS = 60 * 60
+PLACE_SUGGEST_TIMEOUT_SECONDS = 8.0
+# Per-client request limit for the public suggest endpoint, protecting the free quota.
+PLACE_SUGGEST_RATE = "60/min"

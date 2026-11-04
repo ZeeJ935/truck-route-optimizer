@@ -7,6 +7,7 @@ import {
   type FormValues,
 } from '../features/analysis/validateForm'
 import { browserOffsetMinutes, defaultDepartureInput, offsetLabel } from '../utils/time'
+import { PlaceInput } from './PlaceInput'
 
 interface AnalysisFormProps {
   busy: boolean
@@ -71,26 +72,24 @@ export function AnalysisForm({ busy, serverErrors, onSubmit, onEdit }: AnalysisF
     <form className="analysis-form" onSubmit={handleSubmit} noValidate aria-label="Trip details">
       <div className="field">
         <label htmlFor={`${id}-origin`}>Origin</label>
-        <input
+        <PlaceInput
           {...fieldProps('origin')}
-          type="text"
-          autoComplete="off"
+          label="Origin"
           placeholder="City, state or address"
           value={values.origin}
-          onChange={(event) => update('origin')(event.target.value)}
+          onChange={update('origin')}
         />
         {errorText('origin')}
       </div>
 
       <div className="field">
         <label htmlFor={`${id}-destination`}>Destination</label>
-        <input
+        <PlaceInput
           {...fieldProps('destination')}
-          type="text"
-          autoComplete="off"
+          label="Destination"
           placeholder="City, state or address"
           value={values.destination}
-          onChange={(event) => update('destination')(event.target.value)}
+          onChange={update('destination')}
         />
         {errorText('destination')}
       </div>

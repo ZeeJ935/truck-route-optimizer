@@ -37,12 +37,22 @@ class FakeSession:
         self._replies = list(replies)
         self._responder = responder
         self.calls: list[tuple[str, dict]] = []
+        self.posts: list[dict] = []
 
     def get(self, url: str, params: dict | None = None, timeout: float | None = None) -> FakeResponse:
         params = dict(params or {})
         self.calls.append((url, params))
         if self._responder is not None:
             return self._responder(url, params)
+        reply = self._replies.pop(0)
+        if isinstance(reply, BaseException):
+            raise reply
+        return reply
+
+    def post(self, url: str, json: Any = None, headers: dict | None = None, timeout: float | None = None) -> FakeResponse:
+        self.posts.append({"url": url, "json": json, "headers": dict(headers or {})})
+        if self._responder is not None:
+            return self._responder(url, {"json": json})
         reply = self._replies.pop(0)
         if isinstance(reply, BaseException):
             raise reply

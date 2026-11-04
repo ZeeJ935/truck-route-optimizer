@@ -5,7 +5,9 @@ from rest_framework.decorators import api_view
 from rest_framework.exceptions import APIException, ParseError, UnsupportedMediaType
 from rest_framework.request import Request
 from rest_framework.response import Response
+from rest_framework.throttling import AnonRateThrottle
 
+from analysis.limits import PLACE_SUGGEST_MAX_CHARS, PLACE_SUGGEST_MIN_CHARS, PLACE_SUGGEST_RATE
 from analysis.request import parse_analysis_request
 from core.errors import ServiceError, ValidationFailed
 
@@ -82,3 +84,38 @@ def analyze_routes(request: Request) -> Response:
     except Exception:
         logger.exception("Unexpected error during route analysis.")
         return Response({"error": {"code": "internal_error", "message": INTERNAL_ERROR_MESSAGE}}, status=500)
+
+
+class PlaceSuggestThrottle(AnonRateThrottle):
+    """Per-client limit on the public suggest endpoint, protecting the TomTom free quota."""
+
+    scope = "place_suggest"
+    rate = PLACE_SUGGEST_RATE
+
+
+@api_view(["GET"])
+def suggest_places(request: Request) -> Response:
+    """Place suggestions for the origin and destination fields: {"suggestions": [{"label", "type"}]}."""
+    query = " ".join(str(request.query_params.get("q", "")).split())
+    if len(query) < PLACE_SUGGEST_MIN_CHARS or len(query) > PLACE_SUGGEST_MAX_CHARS:
+        return error_response(
+            ValidationFailed(
+                "Search text is too short or too long.",
+                fields={"q": f"Enter {PLACE_SUGGEST_MIN_CHARS} to {PLACE_SUGGEST_MAX_CHARS} characters."},
+            )
+        )
+    if not PlaceSuggestThrottle().allow_request(request, None):
+        return Response(
+            {"error": {"code": "rate_limited", "message": "Too many suggestion requests. Please slow down."}},
+            status=429,
+            headers={"Retry-After": str(RETRY_AFTER_SECONDS)},
+        )
+    try:
+        suggestions = wiring.get_place_suggestion_provider().suggest(query)
+    except ServiceError as error:
+        logger.info("Place suggestions failed with %s.", error.code)
+        return error_response(error)
+    except Exception:
+        logger.exception("Unexpected error during place suggestions.")
+        return Response({"error": {"code": "internal_error", "message": INTERNAL_ERROR_MESSAGE}}, status=500)
+    return Response({"suggestions": [{"label": item.label, "type": item.kind} for item in suggestions]})

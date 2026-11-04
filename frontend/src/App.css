@@ -81,6 +81,54 @@
   border-color: var(--color-danger);
 }
 
+/* Place suggestions */
+.place-input {
+  position: relative;
+}
+
+.place-options {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 260px;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  list-style: none;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow);
+}
+
+.place-option {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 40px;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.place-option-active {
+  background: var(--color-info-bg);
+}
+
+.place-option-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.place-option-type {
+  flex: none;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
 .field-hint {
   font-size: 0.78rem;
   color: var(--color-text-muted);

@@ -247,6 +247,16 @@ Errors use one envelope: `{"error": {"code": "...", "message": "...", "fields": 
 
 Error messages never contain stack traces or raw provider responses.
 
+### `GET /api/places/suggest?q=...`
+
+Place suggestions for the Origin and Destination fields.
+- `q` must be 3 to 100 characters.
+- The response is `{"suggestions": [{"label": "Dallas, TX", "type": "area"}, ...]}`, where `type` is `address`, `street` or `area`. There are up to 5 suggestions, limited to the United States.
+- Errors use the same envelope:
+  - `validation_error` (400): the text is too short or too long
+  - `provider_rate_limited` (503), `provider_timeout` (504), `provider_error` (502): TomTom failed
+  - `rate_limited` (429): one client sent more than 60 requests a minute, which protects the free quota
+
 ## Risk rules
 
 Each checkpoint's wind, rain, and snow are classified separately. Lower bounds are inclusive.
@@ -300,6 +310,19 @@ Via-point attempts are optional extras. If one times out or fails after a route 
 ## Distance basis
 
 Each route uses one distance basis: the provider's route length. The provider's geometry distances and travel-time progress distances are scaled so both end at exactly that length. Checkpoint miles, segment miles, ETAs and route totals therefore always agree, even though the length measured along the geometry differs slightly from the road length. In live checks the two differed by less than 0.2%.
+
+## Address suggestions
+
+The Origin and Destination fields suggest places as the driver types. This was added at the user's request, beyond the original brief.
+
+- **Source.** The backend calls TomTom's Places Search "Suggest" API, using the same server-side `TOMTOM_API_KEY` as routing. No key reaches the browser, and no new environment variable is needed. TomTom's free tier allows 10,000 suggest requests a month, four times the 2,500 of the older fuzzy-search typeahead.
+- **Requests.** A search starts only after 3 characters, about 300 ms after the last keystroke. A newer search cancels the outdated request. Repeat searches are answered from a cache in the browser for the session, and from a 1-hour cache on the server.
+- **Results.** Up to 5 US addresses, streets, and cities or areas, shown as text such as "1600 Pennsylvania Avenue, Minneapolis, MN 55426". The country list is one constant, `PLACE_SUGGEST_COUNTRIES` in `backend/analysis/limits.py`.
+- **Using it.** The fields are accessible comboboxes.
+  - Keyboard: arrow keys move through the list, Enter chooses, Escape closes.
+  - Mouse and touch: tap or click an option.
+  - Screen readers hear how many suggestions are available.
+- **Optional by design.** Choosing a suggestion only fills in the text, and the analysis geocodes that text as before. If suggestions fail or are slow, the list simply doesn't appear, and the driver can still type any address and run the analysis.
 
 ## Checkpoints and ETAs
 
@@ -413,6 +436,7 @@ The fixture lives outside `src/`, so it never enters the production bundle.
   - Geocoding results are cached for 1 hour and route responses for 10 minutes.
   - A section reported as `travelMode: "other"` (truck restrictions not applied) is logged on the server.
   - The engine errors `NO_ROUTE_FOUND` and `MAP_MATCHING_FAILURE` are reported as `no_route_found`.
+- **TomTom Places Search Suggest (free tier).** Place suggestions for the Origin and Destination fields: 10,000 free requests a month, no card. It uses the same key as routing.
 - **Open-Meteo forecast API (free, non-commercial).**
   - Hourly wind, rain, showers and snowfall in mph and inches, in UTC, up to 16 days ahead.
   - Coordinates are rounded to 2 decimals and deduplicated, sent in batches of up to 100, and cached for 15 minutes.
@@ -438,6 +462,7 @@ The fixture lives outside `src/`, so it never enters the production bundle.
   - Precipitation is the total for the preceding hour, used as the hourly rate.
   - Wind is the sustained 10 m wind, not gusts.
 - **Truck profile.** Only the load weight is sent, as a lower bound on gross vehicle weight. Truck dimensions, axle weights and hazardous materials are not modelled.
+- **Address suggestions.** Suggestions cover the United States only (one constant to change). Each pause in typing that isn't already cached uses one of the 10,000 free monthly TomTom suggest requests. Requests are limited to 60 a minute per client.
 - **Geocoding.** The top geocoding result is used. An ambiguous name may resolve to an unexpected place, which the app shows in the results.
 - **Heatmap coverage.** The corridor is sampled every 25 miles, with points 10 miles to each side, and is capped at 250 points. It shows weather along the routes, not the whole region.
 - **Time display.** All trip times use the departure's UTC offset, even when the route crosses time zones; the offset is always labelled.
