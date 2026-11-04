@@ -22,11 +22,9 @@ dist/
 Thumbs.db
 *.log
 
-# Tooling artifacts
-.playwright-mcp/
-
-# Local screenshots (kept out of git)
+# Local screenshots and recording notes (kept out of git)
 docs/screenshots/
+docs/loom-script.md
 
 # Playwright test output
 test-results/

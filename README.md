@@ -127,11 +127,10 @@ npm run lint
 npm run build         # type check + production build
 ```
 
-There are three kinds of results, and they are kept separate:
+Test types:
 
-- **Fake-provider tests** (backend `pytest`). TomTom, Open-Meteo and the clock are replaced by test doubles that live only in `backend/tests/`. They prove the rules exactly, including boundaries, all routes being unsafe, rate limits and provider failures. Production wiring cannot reach the fakes.
-- **Fixture checks** (`npm run test:e2e` and a Vitest scenario). These replay `frontend/e2e/fixtures/FIXTURE-analysis-response.json`, which is synthetic and clearly labelled, to exercise the UI states in a real or test browser.
-- **Live checks.** Real TomTom and Open-Meteo data through the running app. These depend on the current weather, so a scenario such as "every route is unsafe" can't be forced live.
+- **Backend `pytest`** uses fake TomTom, Open-Meteo and clock doubles from `backend/tests/`, so the rules, boundaries, rate limits and provider failures are tested exactly. Any real network call fails a test.
+- **Playwright and the Vitest scenario** replay the synthetic `frontend/e2e/fixtures/FIXTURE-analysis-response.json` to cover UI states, such as every route being unsafe, that live weather can't produce on demand.
 
 ## Deployment
 

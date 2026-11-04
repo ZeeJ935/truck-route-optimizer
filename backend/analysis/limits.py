@@ -25,7 +25,7 @@ CORRIDOR_SPACING_MILES = 25.0
 CORRIDOR_SIDE_OFFSET_MILES = 10.0
 
 # Corridor points are thinned evenly above this cap.
-# SPEC.md suggested 600, but Open-Meteo counts each location as one call and
+# The original plan was 600, but Open-Meteo counts each location as one call and
 # allows 600 calls per minute per IP (measured: the 7th 100-location request in
 # one minute returned HTTP 429). 600 corridor points plus checkpoints would not
 # fit in one analysis, so the cap is lowered.
